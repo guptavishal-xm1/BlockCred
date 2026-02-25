@@ -6,6 +6,7 @@ This build is focused on operational readiness:
 - reliable async anchor/revoke job handling
 - typed admin reconcile + ops visibility endpoints
 - public token verifier for employer trust checks
+- JWT staff authentication with refresh-token rotation and RBAC
 - wallet kill switch and compromise-safe recovery flow
 - audit integrity with daily digest and retention policies
 - deployable `pilot` profile for single-VM + Docker + Postgres
@@ -21,12 +22,18 @@ This build is focused on operational readiness:
   - admin reconcile with cooldown handling
 - Public verification endpoint `/api/public/verify?t=...`
 - Signed share links via minimal HMAC token service
+- Staff auth APIs (`/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/me`)
+- RBAC policy:
+  - `ADMIN` -> ops + issuer + internal verify
+  - `ISSUER` -> issue/revoke/share + internal verify
+  - `AUDITOR` -> internal verify (read-only)
 - Admin ops endpoints for:
   - credential state
   - job queue/failures
   - audit timeline
   - summary dashboard data
   - anomalies feed
+  - security status
   - wallet controls
 - Correlation ID propagation (`X-Request-Id`)
 - Audit enrichment (`severity`, `category`, `requestId`)
@@ -39,7 +46,7 @@ This build is focused on operational readiness:
 
 - Java 17
 - Spring Boot 3.3.2
-- Spring Web, Validation, Data JPA, Cache, Actuator
+- Spring Web, Validation, Data JPA, Cache, Security, Actuator
 - Flyway
 - H2 (dev/test)
 - PostgreSQL (pilot)
@@ -87,6 +94,16 @@ npm run dev
 
 Frontend: `http://localhost:5173`
 
+Routes:
+- `http://localhost:5173/login` (staff login)
+- `http://localhost:5173/issuer` (issuer console)
+- `http://localhost:5173/ops` (admin operations)
+- `http://localhost:5173/verify?t=...` (public verification)
+
+Dev seed users:
+- `admin / AdminPass#2026`
+- `issuer / IssuerPass#2026`
+
 ## Pilot Deployment (Single VM + Docker)
 
 1. Copy env template:
@@ -96,11 +113,15 @@ cp .env.example .env
 ```
 
 2. Fill required secrets in `.env`:
-- `BLOCKCRED_ADMIN_TOKEN`
-- `BLOCKCRED_ISSUER_TOKEN`
+- `BLOCKCRED_JWT_ACTIVE_KEY`
 - `BLOCKCRED_PUBLIC_TOKEN_SECRET`
 - `BLOCKCRED_AUDIT_DIGEST_SECRET`
 - wallet key settings (`BLOCKCRED_WALLET_KEY_SOURCE` + key value/path)
+
+Optional (legacy compatibility):
+- `BLOCKCRED_LEGACY_HEADER_AUTH`
+- `BLOCKCRED_ADMIN_TOKEN`
+- `BLOCKCRED_ISSUER_TOKEN`
 
 3. Start stack:
 
@@ -114,13 +135,25 @@ docker compose --env-file .env up --build -d
 curl -s http://localhost:8080/actuator/health
 ```
 
-## Security Headers
+## Authentication and Security Headers
 
-- Admin ops endpoints: `X-Admin-Token`
-- Issuer mutation endpoints: `X-Issuer-Token` (enabled when `blockcred.auth.issuer-token-enabled=true`)
+- Staff APIs use `Authorization: Bearer <accessToken>` from `/api/auth/login`.
+- Refresh flow uses `/api/auth/refresh` with refresh token rotation.
+- Legacy headers are optional compatibility mode in dev/test:
+  - `X-Admin-Token`
+  - `X-Issuer-Token`
 - Correlation: optional `X-Request-Id`
+- Public employer verification endpoint remains anonymous: `/api/public/verify?t=...`
 
 ## API Overview
+
+### Auth APIs
+
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+- `POST /api/auth/change-password`
 
 ### Credential APIs
 
@@ -143,6 +176,7 @@ curl -s http://localhost:8080/actuator/health
 - `GET /api/ops/audit?credentialId=&limit=`
 - `GET /api/ops/summary`
 - `GET /api/ops/anomalies?limit=`
+- `GET /api/ops/security/status`
 - `GET /api/ops/wallet/status`
 - `POST /api/ops/wallet/disable`
 - `POST /api/ops/wallet/enable`
@@ -155,12 +189,21 @@ curl -s http://localhost:8080/actuator/health
 
 ## End-to-End Internal Flow (cURL)
 
-### Issue
+### 1) Login (issuer or admin)
+
+```bash
+LOGIN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"usernameOrEmail":"issuer","password":"IssuerPass#2026"}')
+ACCESS_TOKEN=$(echo "$LOGIN" | jq -r '.accessToken')
+```
+
+### 2) Issue
 
 ```bash
 curl -s -X POST http://localhost:8080/api/credentials \
   -H "Content-Type: application/json" \
-  -H "X-Issuer-Token: blockcred-issuer-dev-token-change-me" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{
     "payload": {
       "credentialId": "CRED-001",
@@ -175,11 +218,16 @@ curl -s -X POST http://localhost:8080/api/credentials \
   }'
 ```
 
-### Reconcile (typed response)
+### 3) Reconcile (typed response, admin role)
 
 ```bash
+ADMIN_LOGIN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"usernameOrEmail":"admin","password":"AdminPass#2026"}')
+ADMIN_ACCESS_TOKEN=$(echo "$ADMIN_LOGIN" | jq -r '.accessToken')
+
 curl -s -X POST http://localhost:8080/api/ops/reconcile/CRED-001 \
-  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+  -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN"
 ```
 
 Response includes:
@@ -203,6 +251,10 @@ BACKEND_URL=http://localhost:8080 ISSUER_TOKEN=blockcred-issuer-dev-token-change
 ```
 
 ## Operator SOP Scripts
+
+Compatibility note:
+- Current scripts use `X-Admin-Token`.
+- In JWT-only pilot mode (`blockcred.auth.legacy-header-enabled=false`), call ops APIs with bearer access tokens instead.
 
 ### Start-of-day check
 
@@ -241,14 +293,14 @@ ADMIN_TOKEN=blockcred-admin-dev-token-change-me DRY_RUN=false ./scripts/ops_retr
 
 ```bash
 curl -s http://localhost:8080/api/ops/wallet/status \
-  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+  -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN"
 ```
 
 ### Disable (compromise-safe mode)
 
 ```bash
 curl -s -X POST http://localhost:8080/api/ops/wallet/disable \
-  -H "X-Admin-Token: blockcred-admin-dev-token-change-me" \
+  -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"reason":"Incident response"}'
 ```
@@ -257,7 +309,7 @@ curl -s -X POST http://localhost:8080/api/ops/wallet/disable \
 
 ```bash
 curl -s -X POST http://localhost:8080/api/ops/wallet/enable \
-  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+  -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN"
 ```
 
 When disabled, chain submission is blocked and jobs remain retryable with `failureCode=WALLET_DISABLED`.

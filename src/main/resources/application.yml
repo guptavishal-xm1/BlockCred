@@ -37,8 +37,30 @@ blockcred:
     consistency-scan-window-hours: 24
   auth:
     admin-token: blockcred-admin-dev-token-change-me
+    legacy-header-enabled: true
     issuer-token-enabled: false
     issuer-token: blockcred-issuer-dev-token-change-me
+    jwt:
+      issuer: blockcred-staff
+      active-kid: v1
+      active-key: blockcred-jwt-dev-active-key-change-me
+      previous-kid:
+      previous-key:
+      access-token-ttl-minutes: 15
+    refresh-token-ttl-days: 7
+    login:
+      lock-threshold: 5
+      lock-minutes: 15
+    seed:
+      enabled: true
+      admin-username: admin
+      admin-email: admin@blockcred.local
+      admin-display-name: University Admin
+      admin-password: AdminPass#2026
+      issuer-username: issuer
+      issuer-email: issuer@blockcred.local
+      issuer-display-name: University Issuer
+      issuer-password: IssuerPass#2026
   wallet:
     enabled: true
     disabled-retry-seconds: 60

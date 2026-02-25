@@ -2,6 +2,7 @@ package com.blockcred.api;
 
 import com.blockcred.service.CredentialService;
 import com.blockcred.service.ApiAccessService;
+import com.blockcred.service.CurrentUserService;
 import com.blockcred.service.VerificationTokenService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,17 +21,20 @@ public class CredentialController {
 
     private final CredentialService credentialService;
     private final ApiAccessService apiAccessService;
+    private final CurrentUserService currentUserService;
     private final VerificationTokenService verificationTokenService;
     private final String verifierBaseUrl;
 
     public CredentialController(
             CredentialService credentialService,
             ApiAccessService apiAccessService,
+            CurrentUserService currentUserService,
             VerificationTokenService verificationTokenService,
             @Value("${blockcred.public.verifier-base-url:http://localhost:5173}") String verifierBaseUrl
     ) {
         this.credentialService = credentialService;
         this.apiAccessService = apiAccessService;
+        this.currentUserService = currentUserService;
         this.verificationTokenService = verificationTokenService;
         this.verifierBaseUrl = verifierBaseUrl;
     }
@@ -42,7 +46,7 @@ public class CredentialController {
             @RequestHeader(value = "X-Issuer-Token", required = false) String issuerToken
     ) {
         apiAccessService.requireIssuer(issuerToken);
-        return credentialService.createAndQueueAnchor(request.payload());
+        return credentialService.createAndQueueAnchor(request.payload(), currentUserService.actorOr("issuer"));
     }
 
     @PostMapping("/{credentialId}/revoke")
@@ -51,7 +55,7 @@ public class CredentialController {
             @RequestHeader(value = "X-Issuer-Token", required = false) String issuerToken
     ) {
         apiAccessService.requireIssuer(issuerToken);
-        return credentialService.requestRevoke(credentialId);
+        return credentialService.requestRevoke(credentialId, currentUserService.actorOr("issuer"));
     }
 
     @PostMapping("/{credentialId}/share-link")

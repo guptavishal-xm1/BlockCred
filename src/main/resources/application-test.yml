@@ -15,6 +15,9 @@ spring:
 
 blockcred:
   auth:
+    legacy-header-enabled: true
     issuer-token-enabled: false
+    seed:
+      enabled: false
   wallet:
     enabled: true

@@ -67,10 +67,10 @@ class OpsControllerIntegrationTest {
     @Test
     void adminTokenShouldBeRequiredForOpsEndpoints() throws Exception {
         mockMvc.perform(get("/api/ops/jobs"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
 
         mockMvc.perform(get("/api/ops/jobs").header("X-Admin-Token", "wrong-token"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

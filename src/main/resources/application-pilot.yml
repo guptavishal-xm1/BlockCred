@@ -18,9 +18,28 @@ spring:
 
 blockcred:
   auth:
-    admin-token: ${BLOCKCRED_ADMIN_TOKEN}
-    issuer-token-enabled: true
-    issuer-token: ${BLOCKCRED_ISSUER_TOKEN}
+    admin-token: ${BLOCKCRED_ADMIN_TOKEN:}
+    legacy-header-enabled: ${BLOCKCRED_LEGACY_HEADER_AUTH:false}
+    issuer-token-enabled: ${BLOCKCRED_ISSUER_TOKEN_ENABLED:false}
+    issuer-token: ${BLOCKCRED_ISSUER_TOKEN:}
+    jwt:
+      issuer: ${BLOCKCRED_JWT_ISSUER:blockcred-staff}
+      active-kid: ${BLOCKCRED_JWT_ACTIVE_KID:v1}
+      active-key: ${BLOCKCRED_JWT_ACTIVE_KEY}
+      previous-kid: ${BLOCKCRED_JWT_PREVIOUS_KID:}
+      previous-key: ${BLOCKCRED_JWT_PREVIOUS_KEY:}
+      access-token-ttl-minutes: ${BLOCKCRED_ACCESS_TOKEN_TTL_MINUTES:15}
+    refresh-token-ttl-days: ${BLOCKCRED_REFRESH_TOKEN_TTL_DAYS:7}
+    seed:
+      enabled: ${BLOCKCRED_AUTH_SEED_ENABLED:true}
+      admin-username: ${BLOCKCRED_AUTH_SEED_ADMIN_USERNAME:admin}
+      admin-email: ${BLOCKCRED_AUTH_SEED_ADMIN_EMAIL:admin@blockcred.local}
+      admin-display-name: ${BLOCKCRED_AUTH_SEED_ADMIN_DISPLAY_NAME:University Admin}
+      admin-password: ${BLOCKCRED_AUTH_SEED_ADMIN_PASSWORD:AdminPass#2026}
+      issuer-username: ${BLOCKCRED_AUTH_SEED_ISSUER_USERNAME:issuer}
+      issuer-email: ${BLOCKCRED_AUTH_SEED_ISSUER_EMAIL:issuer@blockcred.local}
+      issuer-display-name: ${BLOCKCRED_AUTH_SEED_ISSUER_DISPLAY_NAME:University Issuer}
+      issuer-password: ${BLOCKCRED_AUTH_SEED_ISSUER_PASSWORD:IssuerPass#2026}
   wallet:
     key-source: ${BLOCKCRED_WALLET_KEY_SOURCE:ENV}
     key-file-path: ${BLOCKCRED_WALLET_KEY_FILE:}

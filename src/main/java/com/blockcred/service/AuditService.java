@@ -59,6 +59,10 @@ public class AuditService {
         return auditLogRepository.countAnomaliesAfter(cutoff);
     }
 
+    public long countByActionAfter(String action, Instant cutoff) {
+        return auditLogRepository.countByActionAndCreatedAtAfter(action, cutoff);
+    }
+
     public List<AuditLogEntity> byCreatedAtRange(Instant from, Instant to) {
         return auditLogRepository.findByCreatedAtRange(from, to);
     }

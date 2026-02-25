@@ -13,6 +13,7 @@ public interface AuditLogRepository extends JpaRepository<AuditLogEntity, Long> 
     List<AuditLogEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
     boolean existsByCredentialIdAndActionAndCreatedAtAfter(String credentialId, String action, Instant cutoff);
     long countByActionStartingWithAndCreatedAtAfter(String prefix, Instant cutoff);
+    long countByActionAndCreatedAtAfter(String action, Instant cutoff);
     long deleteByCreatedAtBefore(Instant cutoff);
 
     @Query("select a from AuditLogEntity a where (a.action like 'CONSISTENCY_%' or a.action like 'JOB_%FAILED') order by a.createdAt desc")

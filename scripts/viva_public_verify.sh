@@ -3,11 +3,8 @@ set -euo pipefail
 
 BACKEND_URL="${BACKEND_URL:-http://localhost:8080}"
 ISSUER_TOKEN="${ISSUER_TOKEN:-}"
-
-issuer_headers=()
-if [[ -n "${ISSUER_TOKEN}" ]]; then
-  issuer_headers=(-H "X-Issuer-Token: ${ISSUER_TOKEN}")
-fi
+ISSUER_USERNAME="${ISSUER_USERNAME:-issuer}"
+ISSUER_PASSWORD="${ISSUER_PASSWORD:-IssuerPass#2026}"
 
 extract_json_string() {
   local key="$1"
@@ -19,6 +16,31 @@ print_step() {
   printf '%s\n' "$1"
   printf '%s\n' "============================================================"
 }
+
+issuer_headers=()
+issuer_auth_headers=()
+if [[ -n "${ISSUER_TOKEN}" ]]; then
+  issuer_headers=(-H "X-Issuer-Token: ${ISSUER_TOKEN}")
+  issuer_auth_headers=("${issuer_headers[@]}")
+else
+  LOGIN_BODY=$(cat <<JSON
+{
+  "usernameOrEmail": "${ISSUER_USERNAME}",
+  "password": "${ISSUER_PASSWORD}"
+}
+JSON
+)
+  LOGIN_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "${LOGIN_BODY}")
+  ACCESS_TOKEN=$(printf '%s' "${LOGIN_RESPONSE}" | extract_json_string "accessToken")
+  if [[ -z "${ACCESS_TOKEN}" ]]; then
+    echo "Issuer login failed. Set ISSUER_TOKEN for legacy mode or provide ISSUER_USERNAME/ISSUER_PASSWORD."
+    echo "Response: ${LOGIN_RESPONSE}"
+    exit 1
+  fi
+  issuer_auth_headers=(-H "Authorization: Bearer ${ACCESS_TOKEN}")
+fi
 
 if ! curl -sf "${BACKEND_URL}/actuator/health" >/dev/null 2>&1; then
   if ! curl -sf "${BACKEND_URL}/api/public/verify" >/dev/null 2>&1; then
@@ -49,14 +71,14 @@ JSON
 print_step "1) Issue Credential"
 ISSUE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials" \
   -H "Content-Type: application/json" \
-  "${issuer_headers[@]}" \
+  "${issuer_auth_headers[@]}" \
   -d "${ISSUE_PAYLOAD}")
 printf 'Credential ID: %s\n' "${CRED_ID}"
 printf 'Issue response: %s\n' "${ISSUE_RESPONSE}"
 
 print_step "2) Create Share Link"
 SHARE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials/${CRED_ID}/share-link" \
-  "${issuer_headers[@]}")
+  "${issuer_auth_headers[@]}")
 VERIFY_URL=$(printf '%s' "${SHARE_RESPONSE}" | extract_json_string "verifyUrl")
 TOKEN=$(printf '%s' "${VERIFY_URL}" | sed -n 's/.*[?&]t=\([^&]*\).*/\1/p')
 printf 'Share response: %s\n' "${SHARE_RESPONSE}"
@@ -73,7 +95,7 @@ printf '%s\n' "${VALID_RESPONSE}"
 
 print_step "5) Revoke And Verify (Expected: REVOKED)"
 REVOKE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials/${CRED_ID}/revoke" \
-  "${issuer_headers[@]}")
+  "${issuer_auth_headers[@]}")
 REVOKED_RESPONSE=$(curl -s "${BACKEND_URL}/api/public/verify?t=${TOKEN}")
 printf 'Revoke response: %s\n' "${REVOKE_RESPONSE}"
 printf '%s\n' "${REVOKED_RESPONSE}"

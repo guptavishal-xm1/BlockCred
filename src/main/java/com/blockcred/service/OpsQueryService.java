@@ -4,6 +4,7 @@ import com.blockcred.api.OpsAuditEntryResponse;
 import com.blockcred.api.OpsAnomalyResponse;
 import com.blockcred.api.OpsCredentialStateResponse;
 import com.blockcred.api.OpsJobSummaryResponse;
+import com.blockcred.api.OpsSecurityStatusResponse;
 import com.blockcred.api.OpsSummaryResponse;
 import com.blockcred.domain.ChainLookupResult;
 import com.blockcred.domain.JobStatus;
@@ -30,6 +31,8 @@ public class OpsQueryService {
     private final WorkerHeartbeatService workerHeartbeatService;
     private final BlockchainGateway blockchainGateway;
     private final AuditDigestService auditDigestService;
+    private final AuthService authService;
+    private final ApiAccessService apiAccessService;
     private final int pendingMaxAgeMinutes;
     private final int retryThreshold;
     private final int revocationGraceMinutes;
@@ -41,6 +44,8 @@ public class OpsQueryService {
             WorkerHeartbeatService workerHeartbeatService,
             BlockchainGateway blockchainGateway,
             AuditDigestService auditDigestService,
+            AuthService authService,
+            ApiAccessService apiAccessService,
             @Value("${blockcred.ops.pending-max-age-minutes:10}") int pendingMaxAgeMinutes,
             @Value("${blockcred.ops.retry-threshold:3}") int retryThreshold,
             @Value("${blockcred.ops.revocation-grace-minutes:15}") int revocationGraceMinutes
@@ -51,6 +56,8 @@ public class OpsQueryService {
         this.workerHeartbeatService = workerHeartbeatService;
         this.blockchainGateway = blockchainGateway;
         this.auditDigestService = auditDigestService;
+        this.authService = authService;
+        this.apiAccessService = apiAccessService;
         this.pendingMaxAgeMinutes = pendingMaxAgeMinutes;
         this.retryThreshold = retryThreshold;
         this.revocationGraceMinutes = revocationGraceMinutes;
@@ -150,6 +157,20 @@ public class OpsQueryService {
         return auditService.anomalies(safeLimit).stream()
                 .map(this::toAnomaly)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public OpsSecurityStatusResponse securityStatus() {
+        Instant now = Instant.now();
+        long failedLogins24h = auditService.countByActionAfter("AUTH_LOGIN_FAILED", now.minus(Duration.ofHours(24)));
+        return new OpsSecurityStatusResponse(
+                authService.lockedAccountCount(),
+                authService.disabledAccountCount(),
+                failedLogins24h,
+                authService.activeRefreshSessions(),
+                apiAccessService.isLegacyHeaderEnabled(),
+                now
+        );
     }
 
     private OpsJobSummaryResponse toJobSummary(AnchorJobEntity job) {

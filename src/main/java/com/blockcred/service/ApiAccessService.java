@@ -4,6 +4,8 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -19,28 +21,35 @@ public class ApiAccessService {
     private static final String DEFAULT_ADMIN_TOKEN = "blockcred-admin-dev-token-change-me";
     private static final String DEFAULT_ISSUER_TOKEN = "blockcred-issuer-dev-token-change-me";
     private static final String DEFAULT_PUBLIC_TOKEN_SECRET = "blockcred-dev-secret-change-me";
+    private static final String DEFAULT_JWT_ACTIVE_KEY = "blockcred-jwt-dev-active-key-change-me";
 
     private final String adminToken;
+    private final boolean legacyHeaderEnabled;
     private final boolean issuerTokenEnabled;
     private final String issuerToken;
     private final String publicTokenSecret;
+    private final String jwtActiveKey;
     private final String walletKeySource;
     private final String walletKeyFilePath;
     private final Environment environment;
 
     public ApiAccessService(
             @Value("${blockcred.auth.admin-token:" + DEFAULT_ADMIN_TOKEN + "}") String adminToken,
+            @Value("${blockcred.auth.legacy-header-enabled:true}") boolean legacyHeaderEnabled,
             @Value("${blockcred.auth.issuer-token-enabled:false}") boolean issuerTokenEnabled,
             @Value("${blockcred.auth.issuer-token:" + DEFAULT_ISSUER_TOKEN + "}") String issuerToken,
             @Value("${blockcred.public.token-secret:" + DEFAULT_PUBLIC_TOKEN_SECRET + "}") String publicTokenSecret,
+            @Value("${blockcred.auth.jwt.active-key:" + DEFAULT_JWT_ACTIVE_KEY + "}") String jwtActiveKey,
             @Value("${blockcred.wallet.key-source:ENV}") String walletKeySource,
             @Value("${blockcred.wallet.key-file-path:}") String walletKeyFilePath,
             Environment environment
     ) {
         this.adminToken = adminToken;
+        this.legacyHeaderEnabled = legacyHeaderEnabled;
         this.issuerTokenEnabled = issuerTokenEnabled;
         this.issuerToken = issuerToken;
         this.publicTokenSecret = publicTokenSecret;
+        this.jwtActiveKey = jwtActiveKey;
         this.walletKeySource = walletKeySource;
         this.walletKeyFilePath = walletKeyFilePath;
         this.environment = environment;
@@ -68,24 +77,61 @@ public class ApiAccessService {
         if (DEFAULT_PUBLIC_TOKEN_SECRET.equals(publicTokenSecret)) {
             throw new IllegalStateException("Non-dev profile requires blockcred.public.token-secret override");
         }
+        if (DEFAULT_JWT_ACTIVE_KEY.equals(jwtActiveKey)) {
+            throw new IllegalStateException("Non-dev profile requires blockcred.auth.jwt.active-key override");
+        }
         if (!walletKeyPresent()) {
             throw new IllegalStateException("Non-dev profile requires wallet key material (ENV/FILE) configured");
         }
     }
 
     public void requireAdmin(String providedToken) {
-        if (!secureEquals(adminToken, providedToken)) {
+        if (hasRole("ROLE_ADMIN")) {
+            return;
+        }
+        if (!legacyHeaderEnabled) {
+            throw forbidden();
+        }
+        if (!matchesAdminToken(providedToken)) {
             throw forbidden();
         }
     }
 
     public void requireIssuer(String providedToken) {
-        if (!issuerTokenEnabled) {
+        if (hasRole("ROLE_ADMIN") || hasRole("ROLE_ISSUER")) {
             return;
         }
-        if (!secureEquals(issuerToken, providedToken)) {
+        if (!legacyHeaderEnabled) {
             throw forbidden();
         }
+        if (matchesAdminToken(providedToken)) {
+            return;
+        }
+        if (issuerTokenEnabled && matchesIssuerToken(providedToken)) {
+            return;
+        }
+        throw forbidden();
+    }
+
+    public boolean isLegacyHeaderEnabled() {
+        return legacyHeaderEnabled;
+    }
+
+    public boolean matchesAdminToken(String providedToken) {
+        if (adminToken == null || adminToken.isBlank() || providedToken == null || providedToken.isBlank()) {
+            return false;
+        }
+        return secureEquals(adminToken, providedToken);
+    }
+
+    public boolean matchesIssuerToken(String providedToken) {
+        if (!issuerTokenEnabled) {
+            return false;
+        }
+        if (issuerToken == null || issuerToken.isBlank() || providedToken == null || providedToken.isBlank()) {
+            return false;
+        }
+        return secureEquals(issuerToken, providedToken);
     }
 
     private boolean secureEquals(String expected, String provided) {
@@ -105,6 +151,14 @@ public class ApiAccessService {
 
     private ResponseStatusException forbidden() {
         return new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden");
+    }
+
+    private boolean hasRole(String role) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getAuthorities() == null) {
+            return false;
+        }
+        return auth.getAuthorities().stream().anyMatch(granted -> role.equals(granted.getAuthority()));
     }
 
     private boolean walletKeyPresent() {

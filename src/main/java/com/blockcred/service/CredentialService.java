@@ -43,6 +43,11 @@ public class CredentialService {
 
     @Transactional
     public CredentialResponse createAndQueueAnchor(CredentialCanonicalPayload payload) {
+        return createAndQueueAnchor(payload, "issuer");
+    }
+
+    @Transactional
+    public CredentialResponse createAndQueueAnchor(CredentialCanonicalPayload payload, String actor) {
         String hash = hashService.generateHash(payload);
         String canonical = hashService.canonicalJson(payload);
 
@@ -61,20 +66,25 @@ public class CredentialService {
         credentialRepository.save(credential);
 
         ensureActiveJob(payload.credentialId(), hash, JobType.ANCHOR);
-        auditService.log("ISSUED", payload.credentialId(), "issuer", hash);
+        auditService.log("ISSUED", payload.credentialId(), actor, hash);
         evict(hash);
         return new CredentialResponse(payload.credentialId(), hash, credential.getLifecycleStatus());
     }
 
     @Transactional
     public CredentialResponse requestRevoke(String credentialId) {
+        return requestRevoke(credentialId, "issuer");
+    }
+
+    @Transactional
+    public CredentialResponse requestRevoke(String credentialId, String actor) {
         CredentialEntity credential = credentialRepository.findByCredentialId(credentialId)
                 .orElseThrow(() -> new IllegalArgumentException("Credential not found"));
 
         credential.setLifecycleStatus(stateMachine.transition(credential.getLifecycleStatus(), CredentialEvent.REVOKE_REQUESTED));
         credentialRepository.save(credential);
         ensureActiveJob(credentialId, credential.getHash(), JobType.REVOKE);
-        auditService.log("REVOKE_REQUESTED", credentialId, "issuer", credential.getHash());
+        auditService.log("REVOKE_REQUESTED", credentialId, actor, credential.getHash());
         evict(credential.getHash());
         return new CredentialResponse(credentialId, credential.getHash(), credential.getLifecycleStatus());
     }

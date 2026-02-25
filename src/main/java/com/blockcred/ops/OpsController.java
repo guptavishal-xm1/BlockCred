@@ -4,6 +4,7 @@ import com.blockcred.api.OpsAuditEntryResponse;
 import com.blockcred.api.OpsAnomalyResponse;
 import com.blockcred.api.OpsCredentialStateResponse;
 import com.blockcred.api.OpsJobSummaryResponse;
+import com.blockcred.api.OpsSecurityStatusResponse;
 import com.blockcred.api.OpsSummaryResponse;
 import com.blockcred.api.ReconcileResultResponse;
 import com.blockcred.api.WalletControlRequest;
@@ -12,6 +13,7 @@ import com.blockcred.api.WalletStatusResponse;
 import com.blockcred.domain.JobStatus;
 import com.blockcred.domain.ReconcileDecision;
 import com.blockcred.service.ApiAccessService;
+import com.blockcred.service.CurrentUserService;
 import com.blockcred.service.JobService;
 import com.blockcred.service.OpsQueryService;
 import com.blockcred.service.WalletControlService;
@@ -28,18 +30,21 @@ public class OpsController {
     private final OpsQueryService opsQueryService;
     private final ApiAccessService apiAccessService;
     private final WalletControlService walletControlService;
+    private final CurrentUserService currentUserService;
     private final long cooldownSeconds;
 
     public OpsController(
             JobService jobService,
             OpsQueryService opsQueryService,
             ApiAccessService apiAccessService,
+            CurrentUserService currentUserService,
             WalletControlService walletControlService,
             @Value("${blockcred.worker.cooldown-seconds:60}") long cooldownSeconds
     ) {
         this.jobService = jobService;
         this.opsQueryService = opsQueryService;
         this.apiAccessService = apiAccessService;
+        this.currentUserService = currentUserService;
         this.walletControlService = walletControlService;
         this.cooldownSeconds = cooldownSeconds;
     }
@@ -50,7 +55,7 @@ public class OpsController {
             @RequestHeader(value = "X-Admin-Token", required = false) String adminToken
     ) {
         apiAccessService.requireAdmin(adminToken);
-        ReconcileDecision decision = jobService.reconcile(credentialId, "admin", Duration.ofSeconds(cooldownSeconds));
+        ReconcileDecision decision = jobService.reconcile(credentialId, currentUserService.actorOr("admin"), Duration.ofSeconds(cooldownSeconds));
         return new ReconcileResultResponse(
                 decision.result(),
                 decision.credentialId(),
@@ -107,6 +112,12 @@ public class OpsController {
         return opsQueryService.anomalies(limit);
     }
 
+    @GetMapping("/security/status")
+    public OpsSecurityStatusResponse securityStatus(@RequestHeader(value = "X-Admin-Token", required = false) String adminToken) {
+        apiAccessService.requireAdmin(adminToken);
+        return opsQueryService.securityStatus();
+    }
+
     @GetMapping("/wallet/status")
     public WalletStatusResponse walletStatus(@RequestHeader(value = "X-Admin-Token", required = false) String adminToken) {
         apiAccessService.requireAdmin(adminToken);
@@ -120,12 +131,12 @@ public class OpsController {
     ) {
         apiAccessService.requireAdmin(adminToken);
         String reason = request == null ? null : request.reason();
-        return walletControlService.disableWallet("admin", reason);
+        return walletControlService.disableWallet(currentUserService.actorOr("admin"), reason);
     }
 
     @PostMapping("/wallet/enable")
     public WalletControlResponse walletEnable(@RequestHeader(value = "X-Admin-Token", required = false) String adminToken) {
         apiAccessService.requireAdmin(adminToken);
-        return walletControlService.enableWallet("admin");
+        return walletControlService.enableWallet(currentUserService.actorOr("admin"));
     }
 }

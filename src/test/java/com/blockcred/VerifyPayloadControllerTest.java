@@ -73,12 +73,14 @@ class VerifyPayloadControllerTest {
         String body = objectMapper.writeValueAsString(new VerifyPayloadRequest(payload));
 
         String response1 = mockMvc.perform(post("/api/verify/payload")
+                        .header("X-Admin-Token", "blockcred-admin-dev-token-change-me")
                         .contentType("application/json")
                         .content(body))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
         String response2 = mockMvc.perform(post("/api/verify/payload")
+                        .header("X-Admin-Token", "blockcred-admin-dev-token-change-me")
                         .contentType("application/json")
                         .content(body))
                 .andExpect(status().isOk())
