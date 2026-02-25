@@ -43,7 +43,7 @@ public class PublicVerificationService {
     }
 
     private PublicVerificationResponse mapResponse(VerificationResponse response) {
-        VerificationStatus status = response.verificationStatus();
+        VerificationStatus status = publicStatus(response);
         return new PublicVerificationResponse(
                 status,
                 headline(status),
@@ -57,6 +57,15 @@ public class PublicVerificationService {
                 explanation(response),
                 REFERENCE_CONTEXT
         );
+    }
+
+    private VerificationStatus publicStatus(VerificationResponse response) {
+        if (response.verificationStatus() == VerificationStatus.NOT_FOUND
+                && response.dbRecordFound()
+                && (response.anchoringState() == AnchoringState.PENDING || response.anchoringState() == AnchoringState.FAILED)) {
+            return VerificationStatus.PENDING_ANCHOR;
+        }
+        return response.verificationStatus();
     }
 
     private PublicVerificationResponse unresolvedResponse() {

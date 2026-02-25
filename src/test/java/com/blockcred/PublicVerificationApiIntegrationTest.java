@@ -87,6 +87,21 @@ class PublicVerificationApiIntegrationTest {
     }
 
     @Test
+    void shouldReturnPendingAnchorWhenLocalCredentialExistsButChainAnchorNotCompleted() throws Exception {
+        String hash = credentialService.createAndQueueAnchor(payload).hash();
+        String token = verificationTokenService.sign(hash).token();
+
+        String body = mockMvc.perform(get("/api/public/verify").param("t", token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode json = objectMapper.readTree(body);
+        assertEquals("PENDING_ANCHOR", json.get("verificationStatus").asText());
+        assertEquals("Issuer record exists; blockchain confirmation pending.", json.get("verdictHeadline").asText());
+        assertEquals("Blockchain confirmation pending", json.get("blockchainConfirmation").asText());
+    }
+
+    @Test
     void malformedExpiredAndMissingTokenShouldReturnSameNeutralUnresolvedShape() throws Exception {
         VerificationTokenService expiredSigner = new VerificationTokenService(
                 "blockcred-dev-secret-change-me",

@@ -151,6 +151,10 @@ This renders a standalone public verification page with:
 - secondary technical transaction link
 - deterministic “Copy verification summary” action
 
+Note:
+
+- Since anchoring is async, a newly issued credential may briefly show `PENDING_ANCHOR` until the worker confirms chain state (typically a few seconds in this setup).
+
 ### 3) Verify via public API directly
 
 ```bash
@@ -170,6 +174,20 @@ The public response includes:
 - `txExplorerUrl`
 - `explanation`
 - `referenceContext`
+
+## Viva Demo Script (All Public States)
+
+Run this to demonstrate `PENDING_ANCHOR -> VALID -> REVOKED -> NOT_FOUND` in one flow:
+
+```bash
+./scripts/viva_public_verify.sh
+```
+
+Optional backend URL override:
+
+```bash
+BACKEND_URL=http://localhost:8080 ./scripts/viva_public_verify.sh
+```
 
 ## Reconcile Endpoint
 
