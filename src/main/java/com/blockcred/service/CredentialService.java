@@ -94,6 +94,15 @@ public class CredentialService {
     }
 
     @Transactional
+    public void queueAnchorRetry(String credentialId) {
+        CredentialEntity credential = credentialRepository.findByCredentialId(credentialId)
+                .orElseThrow(() -> new IllegalArgumentException("Credential not found"));
+        credential.setLifecycleStatus(stateMachine.transition(credential.getLifecycleStatus(), CredentialEvent.ANCHOR_QUEUED));
+        credentialRepository.save(credential);
+        evict(credential.getHash());
+    }
+
+    @Transactional
     public void markRevoked(String credentialId, String txHash) {
         CredentialEntity credential = credentialRepository.findByCredentialId(credentialId)
                 .orElseThrow(() -> new IllegalArgumentException("Credential not found"));
@@ -105,6 +114,10 @@ public class CredentialService {
 
     public Optional<String> findCredentialHashByCredentialId(String credentialId) {
         return credentialRepository.findByCredentialId(credentialId).map(CredentialEntity::getHash);
+    }
+
+    public void evictVerificationCacheForHash(String hash) {
+        evict(hash);
     }
 
     private void ensureActiveJob(String credentialId, String hash, JobType type) {

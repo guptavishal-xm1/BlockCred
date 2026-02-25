@@ -3,7 +3,9 @@ package com.blockcred;
 import com.blockcred.api.CredentialResponse;
 import com.blockcred.api.VerificationResponse;
 import com.blockcred.domain.CredentialCanonicalPayload;
+import com.blockcred.domain.ReconcileResultCode;
 import com.blockcred.domain.VerificationStatus;
+import com.blockcred.domain.ReconcileDecision;
 import com.blockcred.infra.AnchorJobRepository;
 import com.blockcred.infra.AuditLogRepository;
 import com.blockcred.infra.CredentialRepository;
@@ -18,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.CacheManager;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -85,8 +88,8 @@ class VerificationIntegrationTest {
         assertEquals(VerificationStatus.PENDING_ANCHOR, pending.verificationStatus());
 
         blockchainGateway.setUnavailable(false);
-        String result = jobService.reconcile(payload.credentialId(), "admin", Duration.ZERO);
-        assertTrue(result.equals("queued") || result.equals("synced"));
+        ReconcileDecision result = jobService.reconcile(payload.credentialId(), "admin", Duration.ZERO);
+        assertTrue(result.result() == ReconcileResultCode.QUEUED || result.result() == ReconcileResultCode.SYNCED);
 
         jobService.processDueJobs();
         VerificationResponse valid = verificationService.verifyHash(issued.hash());
@@ -101,5 +104,21 @@ class VerificationIntegrationTest {
         blockchainGateway.setUnavailable(true);
         VerificationResponse response = verificationService.verifyHash(issued.hash());
         assertEquals(VerificationStatus.CHAIN_UNAVAILABLE, response.verificationStatus());
+    }
+
+    @Test
+    void shouldRecoverStaleSentJobToRetryable() {
+        credentialService.createAndQueueAnchor(payload);
+        var job = anchorJobRepository.findTopByCredentialIdOrderByCreatedAtDesc(payload.credentialId()).orElseThrow();
+        job.setStatus(com.blockcred.domain.JobStatus.SENT);
+        job.setLastAttemptAt(Instant.now().minusSeconds(300));
+        anchorJobRepository.save(job);
+
+        int recovered = jobService.recoverStaleSentJobs();
+        assertEquals(1, recovered);
+
+        var updated = anchorJobRepository.findTopByCredentialIdOrderByCreatedAtDesc(payload.credentialId()).orElseThrow();
+        assertEquals(com.blockcred.domain.JobStatus.RETRYABLE, updated.getStatus());
+        assertEquals("Recovered stale SENT job", updated.getLastError());
     }
 }

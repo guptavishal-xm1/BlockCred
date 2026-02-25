@@ -1,6 +1,7 @@
 package com.blockcred.api;
 
 import com.blockcred.service.CredentialService;
+import com.blockcred.service.ApiAccessService;
 import com.blockcred.service.VerificationTokenService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,32 +19,47 @@ public class CredentialController {
     private static final long FAILURE_FLOOR_MS = 120;
 
     private final CredentialService credentialService;
+    private final ApiAccessService apiAccessService;
     private final VerificationTokenService verificationTokenService;
     private final String verifierBaseUrl;
 
     public CredentialController(
             CredentialService credentialService,
+            ApiAccessService apiAccessService,
             VerificationTokenService verificationTokenService,
             @Value("${blockcred.public.verifier-base-url:http://localhost:5173}") String verifierBaseUrl
     ) {
         this.credentialService = credentialService;
+        this.apiAccessService = apiAccessService;
         this.verificationTokenService = verificationTokenService;
         this.verifierBaseUrl = verifierBaseUrl;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public CredentialResponse issue(@Valid @RequestBody IssueCredentialRequest request) {
+    public CredentialResponse issue(
+            @Valid @RequestBody IssueCredentialRequest request,
+            @RequestHeader(value = "X-Issuer-Token", required = false) String issuerToken
+    ) {
+        apiAccessService.requireIssuer(issuerToken);
         return credentialService.createAndQueueAnchor(request.payload());
     }
 
     @PostMapping("/{credentialId}/revoke")
-    public CredentialResponse revoke(@PathVariable String credentialId) {
+    public CredentialResponse revoke(
+            @PathVariable String credentialId,
+            @RequestHeader(value = "X-Issuer-Token", required = false) String issuerToken
+    ) {
+        apiAccessService.requireIssuer(issuerToken);
         return credentialService.requestRevoke(credentialId);
     }
 
     @PostMapping("/{credentialId}/share-link")
-    public ShareLinkResponse shareLink(@PathVariable String credentialId) {
+    public ShareLinkResponse shareLink(
+            @PathVariable String credentialId,
+            @RequestHeader(value = "X-Issuer-Token", required = false) String issuerToken
+    ) {
+        apiAccessService.requireIssuer(issuerToken);
         long started = System.nanoTime();
         Optional<String> hash = credentialService.findCredentialHashByCredentialId(credentialId);
         if (hash.isEmpty()) {

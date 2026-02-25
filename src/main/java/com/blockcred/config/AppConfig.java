@@ -9,6 +9,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.time.Clock;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Configuration
@@ -27,5 +29,10 @@ public class AppConfig {
     @Bean
     public Clock clock() {
         return Clock.systemUTC();
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public ExecutorService chainLookupExecutor() {
+        return Executors.newFixedThreadPool(4);
     }
 }

@@ -4,6 +4,7 @@ import com.blockcred.api.PublicVerificationResponse;
 import com.blockcred.api.VerificationResponse;
 import com.blockcred.domain.AnchoringState;
 import com.blockcred.domain.VerificationStatus;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -19,23 +20,28 @@ public class PublicVerificationService {
     private final VerificationService verificationService;
     private final Clock clock;
     private final String txExplorerBaseUrl;
+    private final MeterRegistry meterRegistry;
 
     public PublicVerificationService(
             VerificationTokenService tokenService,
             VerificationService verificationService,
             Clock clock,
+            MeterRegistry meterRegistry,
             @Value("${blockcred.public.tx-explorer-base-url:https://amoy.polygonscan.com/tx}") String txExplorerBaseUrl
     ) {
         this.tokenService = tokenService;
         this.verificationService = verificationService;
         this.clock = clock;
+        this.meterRegistry = meterRegistry;
         this.txExplorerBaseUrl = txExplorerBaseUrl;
     }
 
     public PublicVerificationResponse verifyFromToken(String rawToken) {
         Optional<VerificationTokenService.TokenClaims> claims = tokenService.parseAndVerify(rawToken);
         if (claims.isEmpty()) {
-            return unresolvedResponse();
+            PublicVerificationResponse unresolved = unresolvedResponse();
+            incrementVerifyCounter(unresolved.verificationStatus());
+            return unresolved;
         }
 
         VerificationResponse response = verificationService.verifyHashLive(claims.get().credentialHash());
@@ -146,5 +152,13 @@ public class PublicVerificationService {
             return base + txHash;
         }
         return base + "/" + txHash;
+    }
+
+    private void incrementVerifyCounter(VerificationStatus status) {
+        meterRegistry.counter(
+                "blockcred.verify.requests",
+                "surface", "public",
+                "status", status.name()
+        ).increment();
     }
 }

@@ -7,10 +7,13 @@ Spring Boot reference implementation of BlockCred with a trust-first verificatio
 - Deterministic canonical payload hashing
 - Verification API by payload, credential ID, and hash
 - Async anchor/revoke worker with retries and reconcile endpoint
+- CAS-style job claim, stale `SENT` recovery, and explicit failure codes
 - Modular backend services with cache-backed verification
 - Public verification endpoint: `/api/public/verify?t=...`
 - Minimal HMAC token service for signed verification links
 - Share-link endpoint for issuer flow
+- Correlation IDs, audit request IDs, and actuator metrics
+- Admin ops inspection endpoints for credential/job/audit state
 - React + Tailwind frontend:
   - University panel (issue, revoke, reconcile)
   - Employer verifier panel (internal tools)
@@ -22,6 +25,7 @@ Spring Boot reference implementation of BlockCred with a trust-first verificatio
 - Java 17
 - Spring Boot 3.3.2
 - Spring Web, Validation, JPA, Cache
+- Spring Boot Actuator + Micrometer
 - H2 (in-memory)
 - Caffeine
 - React 19 + Vite
@@ -52,6 +56,16 @@ Notes:
 - Vite proxies `/api` to `http://localhost:8080`.
 - Backend CORS allows `http://localhost:5173`.
 
+## Auth Headers
+
+- Admin ops endpoints require `X-Admin-Token`.
+- Credential mutation endpoints (`issue`, `revoke`, `share-link`) can optionally require `X-Issuer-Token` when `blockcred.auth.issuer-token-enabled=true`.
+
+Dev defaults (from `application.yml`):
+
+- `blockcred.auth.admin-token=blockcred-admin-dev-token-change-me`
+- `blockcred.auth.issuer-token=blockcred-issuer-dev-token-change-me`
+
 ## API Overview
 
 - `POST /api/credentials`
@@ -61,7 +75,13 @@ Notes:
 - `GET /api/verify?credentialId=...`
 - `GET /api/verify/hash/{hash}`
 - `GET /api/public/verify?t=...`
-- `POST /api/ops/reconcile/{credentialId}` (admin-only, requires `X-Admin: true`)
+- `POST /api/ops/reconcile/{credentialId}` (admin-only)
+- `GET /api/ops/credentials/{credentialId}/state` (admin-only)
+- `GET /api/ops/jobs?status=&limit=` (admin-only)
+- `GET /api/ops/audit?credentialId=&limit=` (admin-only)
+- `GET /actuator/health`
+- `GET /actuator/metrics`
+- `GET /actuator/info`
 
 ## End-to-End (Internal Flow)
 
@@ -85,6 +105,7 @@ Sample payload:
 ```bash
 curl -s -X POST http://localhost:8080/api/credentials \
   -H "Content-Type: application/json" \
+  -H "X-Issuer-Token: blockcred-issuer-dev-token-change-me" \
   -d '{
     "payload": {
       "credentialId": "CRED-001",
@@ -127,7 +148,8 @@ curl -s -X POST http://localhost:8080/api/verify/payload \
 ### 1) Generate share link
 
 ```bash
-curl -s -X POST http://localhost:8080/api/credentials/CRED-001/share-link
+curl -s -X POST http://localhost:8080/api/credentials/CRED-001/share-link \
+  -H "X-Issuer-Token: blockcred-issuer-dev-token-change-me"
 ```
 
 Response shape:
@@ -193,12 +215,35 @@ BACKEND_URL=http://localhost:8080 ./scripts/viva_public_verify.sh
 
 ```bash
 curl -s -X POST http://localhost:8080/api/ops/reconcile/CRED-001 \
-  -H "X-Admin: true"
+  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
 ```
 
-If the job is already confirmed, expected response:
+Typed response example:
 
-`{"error":"No actionable job: already confirmed"}`
+`{"result":"NO_ACTIONABLE_JOB","credentialId":"CRED-001","jobType":"ANCHOR","jobStatus":"CONFIRMED","checkedAt":"...","message":"No actionable job: already confirmed"}`
+
+## Ops Inspection Endpoints
+
+```bash
+curl -s "http://localhost:8080/api/ops/credentials/CRED-001/state" \
+  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+
+curl -s "http://localhost:8080/api/ops/jobs?status=FINAL_FAILED&limit=20" \
+  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+
+curl -s "http://localhost:8080/api/ops/audit?credentialId=CRED-001&limit=20" \
+  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+```
+
+## Ops Scripts
+
+```bash
+chmod +x scripts/ops_state.sh scripts/ops_retry_failed.sh
+
+./scripts/ops_state.sh CRED-001
+DRY_RUN=true ./scripts/ops_retry_failed.sh
+DRY_RUN=false ./scripts/ops_retry_failed.sh
+```
 
 ## Sandbox Debug Utility
 
@@ -209,6 +254,20 @@ mvn spring-boot:run -Dspring-boot.run.arguments=--blockcred.sandbox.enabled=true
 ```
 
 It prints canonical JSON, computed hash, DB/chain lookup inputs, and resolver verdict.
+
+## Ops Runbook (Quick Recovery)
+
+1. If chain/RPC is unavailable:
+- verify with `/api/public/verify?t=...` or `/api/verify/hash/{hash}` and expect controlled `CHAIN_UNAVAILABLE`/`PENDING_ANCHOR`.
+- inspect job backlog with `/api/ops/jobs?status=RETRYABLE`.
+
+2. If jobs reach `FINAL_FAILED`:
+- inspect credential/job/audit with `./scripts/ops_state.sh <credentialId>`.
+- queue retries in controlled mode with `DRY_RUN=false ./scripts/ops_retry_failed.sh`.
+
+3. If reconcile returns cooldown/no-actionable:
+- read typed `result` and `message` from reconcile response.
+- check latest audit entries via `/api/ops/audit`.
 
 ## Verification Statuses
 

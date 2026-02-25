@@ -2,6 +2,7 @@ package com.blockcred.infra;
 
 import com.blockcred.domain.JobStatus;
 import com.blockcred.domain.JobType;
+import com.blockcred.domain.JobFailureCode;
 import jakarta.persistence.*;
 
 import java.time.Instant;
@@ -9,7 +10,8 @@ import java.time.Instant;
 @Entity
 @Table(name = "anchor_jobs", indexes = {
         @Index(name = "idx_anchor_jobs_cred", columnList = "credentialId"),
-        @Index(name = "idx_anchor_jobs_status_next", columnList = "status,nextRunAt")
+        @Index(name = "idx_anchor_jobs_cred_type_created", columnList = "credentialId,jobType,createdAt"),
+        @Index(name = "idx_anchor_jobs_status_next_id", columnList = "status,nextRunAt,id")
 })
 public class AnchorJobEntity {
     @Id
@@ -41,6 +43,10 @@ public class AnchorJobEntity {
 
     @Column
     private String lastError;
+
+    @Enumerated(EnumType.STRING)
+    @Column
+    private JobFailureCode failureCode;
 
     @Column
     private Instant lastManualTriggerAt;
@@ -80,6 +86,10 @@ public class AnchorJobEntity {
     public void setLastAttemptAt(Instant lastAttemptAt) { this.lastAttemptAt = lastAttemptAt; }
     public String getLastError() { return lastError; }
     public void setLastError(String lastError) { this.lastError = lastError; }
+    public JobFailureCode getFailureCode() { return failureCode; }
+    public void setFailureCode(JobFailureCode failureCode) { this.failureCode = failureCode; }
     public Instant getLastManualTriggerAt() { return lastManualTriggerAt; }
     public void setLastManualTriggerAt(Instant lastManualTriggerAt) { this.lastManualTriggerAt = lastManualTriggerAt; }
+    public Instant getCreatedAt() { return createdAt; }
+    public Instant getUpdatedAt() { return updatedAt; }
 }

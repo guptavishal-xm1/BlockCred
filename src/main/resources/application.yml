@@ -17,9 +17,27 @@ spring:
 blockcred:
   worker:
     cooldown-seconds: 60
+    due-batch-size: 100
+    max-batches-per-tick: 5
+    stale-sent-seconds: 120
+  verify:
+    chain-lookup-timeout-ms: 800
+  auth:
+    admin-token: blockcred-admin-dev-token-change-me
+    issuer-token-enabled: false
+    issuer-token: blockcred-issuer-dev-token-change-me
   public:
     token-secret: blockcred-dev-secret-change-me
     token-issuer: blockcred
     token-ttl-days: 180
     verifier-base-url: http://localhost:5173
     tx-explorer-base-url: https://amoy.polygonscan.com/tx
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info
+  endpoint:
+    health:
+      show-details: always

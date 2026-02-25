@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 
 @SpringBootTest(properties = "spring.task.scheduling.enabled=false")
 @AutoConfigureMockMvc
@@ -136,5 +137,12 @@ class PublicVerificationApiIntegrationTest {
 
         assertEquals(malformed.get("decisionHint").asText(), expired.get("decisionHint").asText());
         assertEquals(malformed.get("decisionHint").asText(), missing.get("decisionHint").asText());
+    }
+
+    @Test
+    void shouldEchoRequestIdHeader() throws Exception {
+        mockMvc.perform(get("/api/public/verify").param("t", "bad.token"))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("X-Request-Id"));
     }
 }

@@ -4,6 +4,8 @@ import com.blockcred.domain.ChainLookupResult;
 import com.blockcred.domain.CredentialCanonicalPayload;
 import com.blockcred.domain.VerificationInput;
 import com.blockcred.domain.VerificationVerdict;
+import com.blockcred.infra.AnchorJobEntity;
+import com.blockcred.infra.AnchorJobRepository;
 import com.blockcred.infra.CredentialEntity;
 import com.blockcred.infra.CredentialRepository;
 import com.blockcred.service.BlockchainGateway;
@@ -20,17 +22,20 @@ import java.time.LocalDate;
 public class VerificationSandboxRunner implements CommandLineRunner {
     private final CredentialHashService hashService;
     private final CredentialRepository credentialRepository;
+    private final AnchorJobRepository anchorJobRepository;
     private final BlockchainGateway blockchainGateway;
     private final VerificationVerdictResolver resolver;
 
     public VerificationSandboxRunner(
             CredentialHashService hashService,
             CredentialRepository credentialRepository,
+            AnchorJobRepository anchorJobRepository,
             BlockchainGateway blockchainGateway,
             VerificationVerdictResolver resolver
     ) {
         this.hashService = hashService;
         this.credentialRepository = credentialRepository;
+        this.anchorJobRepository = anchorJobRepository;
         this.blockchainGateway = blockchainGateway;
         this.resolver = resolver;
     }
@@ -60,8 +65,11 @@ public class VerificationSandboxRunner implements CommandLineRunner {
                 chain.chainRevoked()
         );
         VerificationVerdict verdict = resolver.resolve(input);
+        String runId = "sandbox-" + hash.substring(0, Math.min(12, hash.length()));
+        AnchorJobEntity latestJob = anchorJobRepository.findTopByCredentialIdOrderByCreatedAtDesc(sample.credentialId()).orElse(null);
 
         System.out.println("=== Verification Sandbox ===");
+        System.out.println("Run ID: " + runId);
         System.out.println("Canonical JSON: " + canonical);
         System.out.println("Hash: " + hash);
         System.out.println("DB Record Found: " + (entity != null));
@@ -69,5 +77,16 @@ public class VerificationSandboxRunner implements CommandLineRunner {
         System.out.println("Chain Record Found: " + chain.chainRecordFound());
         System.out.println("Verdict: " + verdict.status());
         System.out.println("Explanation: " + verdict.explanation());
+        if (latestJob != null) {
+            System.out.println("Latest Job ID: " + latestJob.getId());
+            System.out.println("Latest Job Type: " + latestJob.getJobType());
+            System.out.println("Latest Job Status: " + latestJob.getStatus());
+            System.out.println("Latest Job Retry Count: " + latestJob.getRetryCount());
+            System.out.println("Latest Job Failure Code: " + latestJob.getFailureCode());
+            System.out.println("Latest Job Last Error: " + latestJob.getLastError());
+            System.out.println("Latest Job Next Run At: " + latestJob.getNextRunAt());
+        } else {
+            System.out.println("Latest Job: none");
+        }
     }
 }

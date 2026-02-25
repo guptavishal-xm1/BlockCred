@@ -2,6 +2,12 @@
 set -euo pipefail
 
 BACKEND_URL="${BACKEND_URL:-http://localhost:8080}"
+ISSUER_TOKEN="${ISSUER_TOKEN:-}"
+
+issuer_headers=()
+if [[ -n "${ISSUER_TOKEN}" ]]; then
+  issuer_headers=(-H "X-Issuer-Token: ${ISSUER_TOKEN}")
+fi
 
 extract_json_string() {
   local key="$1"
@@ -43,12 +49,14 @@ JSON
 print_step "1) Issue Credential"
 ISSUE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials" \
   -H "Content-Type: application/json" \
+  "${issuer_headers[@]}" \
   -d "${ISSUE_PAYLOAD}")
 printf 'Credential ID: %s\n' "${CRED_ID}"
 printf 'Issue response: %s\n' "${ISSUE_RESPONSE}"
 
 print_step "2) Create Share Link"
-SHARE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials/${CRED_ID}/share-link")
+SHARE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials/${CRED_ID}/share-link" \
+  "${issuer_headers[@]}")
 VERIFY_URL=$(printf '%s' "${SHARE_RESPONSE}" | extract_json_string "verifyUrl")
 TOKEN=$(printf '%s' "${VERIFY_URL}" | sed -n 's/.*[?&]t=\([^&]*\).*/\1/p')
 printf 'Share response: %s\n' "${SHARE_RESPONSE}"
@@ -64,7 +72,8 @@ VALID_RESPONSE=$(curl -s "${BACKEND_URL}/api/public/verify?t=${TOKEN}")
 printf '%s\n' "${VALID_RESPONSE}"
 
 print_step "5) Revoke And Verify (Expected: REVOKED)"
-REVOKE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials/${CRED_ID}/revoke")
+REVOKE_RESPONSE=$(curl -s -X POST "${BACKEND_URL}/api/credentials/${CRED_ID}/revoke" \
+  "${issuer_headers[@]}")
 REVOKED_RESPONSE=$(curl -s "${BACKEND_URL}/api/public/verify?t=${TOKEN}")
 printf 'Revoke response: %s\n' "${REVOKE_RESPONSE}"
 printf '%s\n' "${REVOKED_RESPONSE}"

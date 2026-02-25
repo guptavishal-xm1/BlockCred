@@ -1,5 +1,6 @@
 const rawBase = import.meta.env.VITE_API_BASE_URL || '/api'
 const API_BASE = rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase
+const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'blockcred-admin-dev-token-change-me'
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -58,7 +59,7 @@ export const api = {
   reconcileCredential(credentialId) {
     return request(`/ops/reconcile/${encodeURIComponent(credentialId)}`, {
       method: 'POST',
-      headers: { 'X-Admin': 'true' },
+      headers: { 'X-Admin-Token': ADMIN_TOKEN },
     })
   },
 

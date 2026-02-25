@@ -5,7 +5,10 @@ import jakarta.persistence.*;
 import java.time.Instant;
 
 @Entity
-@Table(name = "audit_logs")
+@Table(name = "audit_logs", indexes = {
+        @Index(name = "idx_audit_cred_created", columnList = "credentialId,createdAt"),
+        @Index(name = "idx_audit_action_created", columnList = "action,createdAt")
+})
 public class AuditLogEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -19,6 +22,9 @@ public class AuditLogEntity {
 
     @Column(nullable = false)
     private String actor;
+
+    @Column
+    private String requestId;
 
     @Column
     private String details;
@@ -38,6 +44,8 @@ public class AuditLogEntity {
     public void setCredentialId(String credentialId) { this.credentialId = credentialId; }
     public String getActor() { return actor; }
     public void setActor(String actor) { this.actor = actor; }
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String requestId) { this.requestId = requestId; }
     public String getDetails() { return details; }
     public void setDetails(String details) { this.details = details; }
     public Instant getCreatedAt() { return createdAt; }
