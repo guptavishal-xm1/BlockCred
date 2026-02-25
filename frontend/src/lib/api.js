@@ -61,4 +61,10 @@ export const api = {
       headers: { 'X-Admin': 'true' },
     })
   },
+
+  publicVerifyToken(token, options = {}) {
+    return request(`/public/verify?t=${encodeURIComponent(token)}`, {
+      ...options,
+    })
+  },
 }

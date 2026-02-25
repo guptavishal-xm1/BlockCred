@@ -35,21 +35,29 @@ public class VerificationService {
 
     public VerificationResponse verifyPayload(CredentialCanonicalPayload payload) {
         String hash = hashService.generateHash(payload);
-        return verifyByHash(hash, true);
+        return verifyByHashInternal(hash, true, true);
     }
 
     public VerificationResponse verifyCredentialId(String credentialId) {
         CredentialEntity entity = credentialRepository.findByCredentialId(credentialId)
                 .orElseThrow(() -> new IllegalArgumentException("Credential not found"));
-        return verifyByHash(entity.getHash(), true);
+        return verifyByHashInternal(entity.getHash(), true, true);
     }
 
     public VerificationResponse verifyHash(String hash) {
-        return verifyByHash(hash, true);
+        return verifyByHashInternal(hash, true, true);
     }
 
     public VerificationResponse verifyByHash(String hash, boolean payloadHashMatches) {
-        if (payloadHashMatches && verificationCache != null) {
+        return verifyByHashInternal(hash, payloadHashMatches, true);
+    }
+
+    public VerificationResponse verifyHashLive(String hash) {
+        return verifyByHashInternal(hash, true, false);
+    }
+
+    private VerificationResponse verifyByHashInternal(String hash, boolean payloadHashMatches, boolean useCache) {
+        if (useCache && payloadHashMatches && verificationCache != null) {
             VerificationResponse cached = verificationCache.get(hash, VerificationResponse.class);
             if (cached != null) {
                 return cached;
@@ -83,7 +91,7 @@ public class VerificationService {
                 Instant.now(),
                 verdict.explanation()
         );
-        if (payloadHashMatches && verificationCache != null) {
+        if (useCache && payloadHashMatches && verificationCache != null) {
             verificationCache.put(hash, response);
         }
         return response;

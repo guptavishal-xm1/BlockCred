@@ -1,20 +1,21 @@
-# BlockCred Verification Core + UI
+# BlockCred Verification Core + Public Verifier
 
-Spring Boot reference implementation of the BlockCred verification core:
+Spring Boot reference implementation of BlockCred with a trust-first verification core and a public token-based verifier flow.
 
-- deterministic canonical payload hashing
-- payload-first verification (`/api/verify/payload`)
-- lifecycle state machine with guarded transitions
-- async anchor/revoke job worker with retries
-- reconcile endpoint with admin guard + cooldown
-- hash-keyed verification cache (Caffeine)
-- sandbox runner for verification debugging
+## Implemented Features
 
-React + Tailwind frontend includes:
-
-- University panel (issue, revoke, reconcile)
-- Employer verifier panel (payload, credential ID, hash verification)
-- Student wallet panel (local credential list + quick actions)
+- Deterministic canonical payload hashing
+- Verification API by payload, credential ID, and hash
+- Async anchor/revoke worker with retries and reconcile endpoint
+- Modular backend services with cache-backed verification
+- Public verification endpoint: `/api/public/verify?t=...`
+- Minimal HMAC token service for signed verification links
+- Share-link endpoint for issuer flow
+- React + Tailwind frontend:
+  - University panel (issue, revoke, reconcile)
+  - Employer verifier panel (internal tools)
+  - Student wallet panel
+  - Public `/verify` page (verdict hero + evidence panel)
 
 ## Tech Stack
 
@@ -34,7 +35,7 @@ mvn clean test
 mvn spring-boot:run
 ```
 
-Default app URL: `http://localhost:8080`
+Backend URL: `http://localhost:8080`
 
 ## Frontend Quick Start
 
@@ -49,20 +50,22 @@ Frontend URL: `http://localhost:5173`
 Notes:
 
 - Vite proxies `/api` to `http://localhost:8080`.
-- Backend CORS is also enabled for `http://localhost:5173`.
+- Backend CORS allows `http://localhost:5173`.
 
 ## API Overview
 
 - `POST /api/credentials`
 - `POST /api/credentials/{credentialId}/revoke`
+- `POST /api/credentials/{credentialId}/share-link`
 - `POST /api/verify/payload`
 - `GET /api/verify?credentialId=...`
 - `GET /api/verify/hash/{hash}`
+- `GET /api/public/verify?t=...`
 - `POST /api/ops/reconcile/{credentialId}` (admin-only, requires `X-Admin: true`)
 
-## End-to-End Example
+## End-to-End (Internal Flow)
 
-Use this sample canonical payload:
+Sample payload:
 
 ```json
 {
@@ -77,7 +80,7 @@ Use this sample canonical payload:
 }
 ```
 
-### 1) Issue credential (queues anchoring job)
+### 1) Issue credential
 
 ```bash
 curl -s -X POST http://localhost:8080/api/credentials \
@@ -96,11 +99,11 @@ curl -s -X POST http://localhost:8080/api/credentials \
   }'
 ```
 
-Expected hash for the sample payload (golden vector):
+Golden vector hash for this payload:
 
 `9a1ebcf321a70ac5afd6faa003fbd1590bffbe93546477e53a0a362fdc4c52ba`
 
-### 2) Verify by payload
+### 2) Verify internally (optional)
 
 ```bash
 curl -s -X POST http://localhost:8080/api/verify/payload \
@@ -119,50 +122,75 @@ curl -s -X POST http://localhost:8080/api/verify/payload \
   }'
 ```
 
-### 3) Verify by credential ID
+## Public Verifier Slice (`/verify?t=`)
+
+### 1) Generate share link
 
 ```bash
-curl -s "http://localhost:8080/api/verify?credentialId=CRED-001"
+curl -s -X POST http://localhost:8080/api/credentials/CRED-001/share-link
 ```
 
-### 4) Verify by hash
+Response shape:
+
+```json
+{
+  "verifyUrl": "http://localhost:5173/verify?t=...",
+  "tokenExpiresAt": "2026-...Z"
+}
+```
+
+### 2) Open public verifier page
+
+Open `verifyUrl` in browser.
+
+This renders a standalone public verification page with:
+
+- verdict hero
+- honest freshness text derived from backend `checkedAt`
+- evidence panel
+- secondary technical transaction link
+- deterministic “Copy verification summary” action
+
+### 3) Verify via public API directly
 
 ```bash
-curl -s "http://localhost:8080/api/verify/hash/9a1ebcf321a70ac5afd6faa003fbd1590bffbe93546477e53a0a362fdc4c52ba"
+curl -s "http://localhost:8080/api/public/verify?t=<TOKEN>"
 ```
 
-### 5) Revoke credential
+The public response includes:
 
-```bash
-curl -s -X POST http://localhost:8080/api/credentials/CRED-001/revoke
-```
+- `verificationStatus`
+- `verdictHeadline`
+- `decisionHint`
+- `issuer`
+- `checkedAt`
+- `credentialHash`
+- `blockchainConfirmation`
+- `txHash`
+- `txExplorerUrl`
+- `explanation`
+- `referenceContext`
 
-### 6) Manual reconcile (admin)
+## Reconcile Endpoint
 
 ```bash
 curl -s -X POST http://localhost:8080/api/ops/reconcile/CRED-001 \
   -H "X-Admin: true"
 ```
 
-If revoke/anchor is already confirmed by the worker, reconcile correctly returns:
+If the job is already confirmed, expected response:
 
 `{"error":"No actionable job: already confirmed"}`
 
-## Sandbox Debugging Utility
+## Sandbox Debug Utility
 
-The sandbox runner prints:
-
-- canonical JSON
-- computed hash
-- DB lookup state
-- chain lookup state
-- final verdict + explanation
-
-Run it with:
+Run:
 
 ```bash
 mvn spring-boot:run -Dspring-boot.run.arguments=--blockcred.sandbox.enabled=true
 ```
+
+It prints canonical JSON, computed hash, DB/chain lookup inputs, and resolver verdict.
 
 ## Verification Statuses
 
@@ -176,5 +204,5 @@ mvn spring-boot:run -Dspring-boot.run.arguments=--blockcred.sandbox.enabled=true
 ## Notes
 
 - Current blockchain adapter is `InMemoryBlockchainGateway` for deterministic local behavior.
-- Cache key is always `credentialHash`.
-- Reconcile endpoint enforces admin header and cooldown.
+- Cache key is always `credentialHash` for internal verify paths.
+- Public `/api/public/verify` intentionally uses live verification path (no cache shortcut).

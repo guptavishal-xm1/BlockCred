@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class CredentialService {
@@ -100,6 +101,10 @@ public class CredentialService {
         credential.setLastTxHash(txHash);
         credentialRepository.save(credential);
         evict(credential.getHash());
+    }
+
+    public Optional<String> findCredentialHashByCredentialId(String credentialId) {
+        return credentialRepository.findByCredentialId(credentialId).map(CredentialEntity::getHash);
     }
 
     private void ensureActiveJob(String credentialId, String hash, JobType type) {

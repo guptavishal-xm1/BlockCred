@@ -17,3 +17,9 @@ spring:
 blockcred:
   worker:
     cooldown-seconds: 60
+  public:
+    token-secret: blockcred-dev-secret-change-me
+    token-issuer: blockcred
+    token-ttl-days: 180
+    verifier-base-url: http://localhost:5173
+    tx-explorer-base-url: https://amoy.polygonscan.com/tx
