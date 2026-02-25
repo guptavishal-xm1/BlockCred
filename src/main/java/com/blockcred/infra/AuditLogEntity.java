@@ -1,5 +1,7 @@
 package com.blockcred.infra;
 
+import com.blockcred.domain.AuditCategory;
+import com.blockcred.domain.AuditSeverity;
 import jakarta.persistence.*;
 
 import java.time.Instant;
@@ -23,6 +25,14 @@ public class AuditLogEntity {
     @Column(nullable = false)
     private String actor;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private AuditSeverity severity;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private AuditCategory category;
+
     @Column
     private String requestId;
 
@@ -44,6 +54,10 @@ public class AuditLogEntity {
     public void setCredentialId(String credentialId) { this.credentialId = credentialId; }
     public String getActor() { return actor; }
     public void setActor(String actor) { this.actor = actor; }
+    public AuditSeverity getSeverity() { return severity; }
+    public void setSeverity(AuditSeverity severity) { this.severity = severity; }
+    public AuditCategory getCategory() { return category; }
+    public void setCategory(AuditCategory category) { this.category = category; }
     public String getRequestId() { return requestId; }
     public void setRequestId(String requestId) { this.requestId = requestId; }
     public String getDetails() { return details; }

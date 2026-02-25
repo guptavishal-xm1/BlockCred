@@ -12,6 +12,8 @@ public record OpsJobSummaryResponse(
         String hash,
         JobType jobType,
         JobStatus status,
+        String statusLabel,
+        String recommendedAction,
         int retryCount,
         Instant nextRunAt,
         Instant lastAttemptAt,

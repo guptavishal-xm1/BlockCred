@@ -32,9 +32,11 @@ public class JobService {
     private final BlockchainGateway blockchainGateway;
     private final CredentialService credentialService;
     private final AuditService auditService;
+    private final WalletControlService walletControlService;
     private final int dueBatchSize;
     private final int maxBatchesPerTick;
     private final long staleSentSeconds;
+    private final long walletDisabledRetrySeconds;
     private final Counter jobsProcessedCounter;
     private final Counter jobsFailedCounter;
     private final Counter reconcileInvocationsCounter;
@@ -47,19 +49,23 @@ public class JobService {
             BlockchainGateway blockchainGateway,
             CredentialService credentialService,
             AuditService auditService,
+            WalletControlService walletControlService,
             MeterRegistry meterRegistry,
             @Value("${blockcred.worker.due-batch-size:100}") int dueBatchSize,
             @Value("${blockcred.worker.max-batches-per-tick:5}") int maxBatchesPerTick,
-            @Value("${blockcred.worker.stale-sent-seconds:120}") long staleSentSeconds
+            @Value("${blockcred.worker.stale-sent-seconds:120}") long staleSentSeconds,
+            @Value("${blockcred.wallet.disabled-retry-seconds:60}") long walletDisabledRetrySeconds
     ) {
         this.jobRepository = jobRepository;
         this.credentialRepository = credentialRepository;
         this.blockchainGateway = blockchainGateway;
         this.credentialService = credentialService;
         this.auditService = auditService;
+        this.walletControlService = walletControlService;
         this.dueBatchSize = dueBatchSize;
         this.maxBatchesPerTick = maxBatchesPerTick;
         this.staleSentSeconds = staleSentSeconds;
+        this.walletDisabledRetrySeconds = walletDisabledRetrySeconds;
         this.jobsProcessedCounter = meterRegistry.counter("blockcred.jobs.processed");
         this.jobsFailedCounter = meterRegistry.counter("blockcred.jobs.failed");
         this.reconcileInvocationsCounter = meterRegistry.counter("blockcred.reconcile.invocations");
@@ -142,24 +148,30 @@ public class JobService {
                 log.info("event=job_confirmed requestId={} jobId={} credentialId={} jobType={} status={} txHash={}",
                         requestId(), job.getId(), job.getCredentialId(), job.getJobType(), job.getStatus(), txHash);
             } catch (Exception e) {
-                job.setRetryCount(job.getRetryCount() + 1);
                 job.setLastError(e.getMessage());
                 job.setFailureCode(classifyFailure(e));
-                if (job.getJobType() == JobType.ANCHOR) {
-                    try {
-                        credentialService.markAnchorFailed(job.getCredentialId());
-                    } catch (Exception stateTransitionException) {
-                        log.warn("event=job_mark_anchor_failed_error requestId={} jobId={} credentialId={} message={}",
-                                requestId(), job.getId(), job.getCredentialId(), stateTransitionException.getMessage());
+                if (e instanceof WalletDisabledException) {
+                    job.setStatus(JobStatus.RETRYABLE);
+                    job.setNextRunAt(startedAt.plusSeconds(walletDisabledRetrySeconds));
+                    auditService.log("WALLET_BLOCKED_SUBMISSION", job.getCredentialId(), "worker", e.getMessage(), AuditSeverity.WARN, AuditCategory.SECURITY);
+                } else {
+                    job.setRetryCount(job.getRetryCount() + 1);
+                    if (job.getJobType() == JobType.ANCHOR) {
+                        try {
+                            credentialService.markAnchorFailed(job.getCredentialId());
+                        } catch (Exception stateTransitionException) {
+                            log.warn("event=job_mark_anchor_failed_error requestId={} jobId={} credentialId={} message={}",
+                                    requestId(), job.getId(), job.getCredentialId(), stateTransitionException.getMessage());
+                        }
+                    }
+                    if (job.getRetryCount() >= MAX_RETRIES) {
+                        job.setStatus(JobStatus.FINAL_FAILED);
+                    } else {
+                        job.setStatus(JobStatus.RETRYABLE);
+                        job.setNextRunAt(startedAt.plus(Duration.ofSeconds(15L * job.getRetryCount())));
                     }
                 }
-                if (job.getRetryCount() >= MAX_RETRIES) {
-                    job.setStatus(JobStatus.FINAL_FAILED);
-                } else {
-                    job.setStatus(JobStatus.RETRYABLE);
-                    job.setNextRunAt(startedAt.plus(Duration.ofSeconds(15L * job.getRetryCount())));
-                }
-                auditService.log("JOB_FAILED", job.getCredentialId(), "worker", e.getMessage());
+                auditService.log("JOB_FAILED", job.getCredentialId(), "worker", e.getMessage(), AuditSeverity.WARN, AuditCategory.OPS);
                 jobsFailedCounter.increment();
                 log.warn("event=job_failed requestId={} jobId={} credentialId={} jobType={} retryCount={} status={} failureCode={} message={}",
                         requestId(), job.getId(), job.getCredentialId(), job.getJobType(), job.getRetryCount(), job.getStatus(), job.getFailureCode(), e.getMessage());
@@ -179,25 +191,43 @@ public class JobService {
         AnchorJobEntity job = jobRepository.findTopByCredentialIdOrderByCreatedAtDesc(credentialId).orElse(null);
         Instant checkedAt = Instant.now();
         if (job == null) {
-            auditService.log("RECONCILE_REJECTED", credentialId, actor, "No job found");
+            auditService.log("RECONCILE_REJECTED", credentialId, actor, "No job found", AuditSeverity.WARN, AuditCategory.OPS);
             return new ReconcileDecision(
                     ReconcileResultCode.NO_ACTIONABLE_JOB,
                     credentialId,
                     null,
                     null,
                     checkedAt,
-                    "No actionable job found for credential"
+                    "No actionable job found for credential",
+                    "Issue credential again or inspect audit timeline.",
+                    null
             );
         }
 
         if (job.getStatus() == JobStatus.CONFIRMED) {
-            auditService.log("RECONCILE_REJECTED", credentialId, actor, "Already confirmed");
-            return decision(ReconcileResultCode.NO_ACTIONABLE_JOB, job, checkedAt, "No actionable job: already confirmed");
+            auditService.log("RECONCILE_REJECTED", credentialId, actor, "Already confirmed", AuditSeverity.INFO, AuditCategory.OPS);
+            return decision(
+                    ReconcileResultCode.NO_ACTIONABLE_JOB,
+                    job,
+                    checkedAt,
+                    "No actionable job: already confirmed",
+                    "No action required.",
+                    null
+            );
         }
 
         if (job.getLastManualTriggerAt() != null && job.getLastManualTriggerAt().plus(cooldown).isAfter(Instant.now())) {
-            auditService.log("RECONCILE_REJECTED", credentialId, actor, "Cooldown active");
-            return decision(ReconcileResultCode.COOLDOWN_ACTIVE, job, checkedAt, "Manual reconcile cooldown active");
+            long remaining = Duration.between(Instant.now(), job.getLastManualTriggerAt().plus(cooldown)).toSeconds();
+            long safeRemaining = Math.max(0, remaining);
+            auditService.log("RECONCILE_REJECTED", credentialId, actor, "Cooldown active", AuditSeverity.INFO, AuditCategory.OPS);
+            return decision(
+                    ReconcileResultCode.COOLDOWN_ACTIVE,
+                    job,
+                    checkedAt,
+                    "Manual reconcile cooldown active",
+                    "Wait for cooldown to expire before retrying reconcile.",
+                    safeRemaining
+            );
         }
 
         ChainLookupResult chain = safeLookup(job.getHash());
@@ -208,11 +238,11 @@ public class JobService {
             job.setLastError(null);
             job.setLastManualTriggerAt(Instant.now());
             jobRepository.save(job);
-            auditService.log("RECONCILE_SYNC_ANCHOR", credentialId, actor, "Synced from chain");
+            auditService.log("RECONCILE_SYNC_ANCHOR", credentialId, actor, "Synced from chain", AuditSeverity.INFO, AuditCategory.OPS);
             credentialService.evictVerificationCacheForHash(job.getHash());
             log.info("event=reconcile_synced requestId={} credentialId={} jobId={} jobType={} status={} txHash={}",
                     requestId(), credentialId, job.getId(), job.getJobType(), job.getStatus(), chain.txHash());
-            return decision(ReconcileResultCode.SYNCED, job, checkedAt, "Synced from chain state");
+            return decision(ReconcileResultCode.SYNCED, job, checkedAt, "Synced from chain state", "No action required.", null);
         }
 
         if (job.getJobType() == JobType.REVOKE && chain.chainRecordFound() && chain.chainRevoked()) {
@@ -222,11 +252,11 @@ public class JobService {
             job.setLastError(null);
             job.setLastManualTriggerAt(Instant.now());
             jobRepository.save(job);
-            auditService.log("RECONCILE_SYNC_REVOKE", credentialId, actor, "Synced from chain");
+            auditService.log("RECONCILE_SYNC_REVOKE", credentialId, actor, "Synced from chain", AuditSeverity.INFO, AuditCategory.OPS);
             credentialService.evictVerificationCacheForHash(job.getHash());
             log.info("event=reconcile_synced requestId={} credentialId={} jobId={} jobType={} status={} txHash={}",
                     requestId(), credentialId, job.getId(), job.getJobType(), job.getStatus(), chain.txHash());
-            return decision(ReconcileResultCode.SYNCED, job, checkedAt, "Synced from chain state");
+            return decision(ReconcileResultCode.SYNCED, job, checkedAt, "Synced from chain state", "No action required.", null);
         }
 
         job.setStatus(JobStatus.PENDING);
@@ -236,11 +266,18 @@ public class JobService {
             credentialService.queueAnchorRetry(credentialId);
         }
         jobRepository.save(job);
-        auditService.log("RECONCILE_RETRY", credentialId, actor, credential.getHash());
+        auditService.log("RECONCILE_RETRY", credentialId, actor, credential.getHash(), AuditSeverity.INFO, AuditCategory.OPS);
         credentialService.evictVerificationCacheForHash(job.getHash());
         log.info("event=reconcile_queued requestId={} credentialId={} jobId={} jobType={} status={}",
                 requestId(), credentialId, job.getId(), job.getJobType(), job.getStatus());
-        return decision(ReconcileResultCode.QUEUED, job, checkedAt, "Retry queued");
+        return decision(
+                ReconcileResultCode.QUEUED,
+                job,
+                checkedAt,
+                "Retry queued",
+                "Monitor job status and verify again after next worker cycle.",
+                null
+        );
     }
 
     @Transactional
@@ -255,7 +292,7 @@ public class JobService {
             job.setNextRunAt(Instant.now());
             job.setFailureCode(JobFailureCode.UNKNOWN);
             job.setLastError("Recovered stale SENT job");
-            auditService.log("JOB_RECOVERED_STALE_SENT", job.getCredentialId(), "worker", "Recovered stale SENT job");
+            auditService.log("JOB_RECOVERED_STALE_SENT", job.getCredentialId(), "worker", "Recovered stale SENT job", AuditSeverity.WARN, AuditCategory.OPS);
             log.warn("event=job_recovered_stale_sent requestId={} jobId={} credentialId={} jobType={} retryCount={}",
                     requestId(), job.getId(), job.getCredentialId(), job.getJobType(), job.getRetryCount());
             jobRepository.save(job);
@@ -275,6 +312,7 @@ public class JobService {
     }
 
     private String submit(AnchorJobEntity job) {
+        walletControlService.requireWalletEnabledOrThrow();
         return job.getJobType() == JobType.ANCHOR
                 ? blockchainGateway.anchor(job.getHash())
                 : blockchainGateway.revoke(job.getHash());
@@ -291,14 +329,23 @@ public class JobService {
         }
     }
 
-    private ReconcileDecision decision(ReconcileResultCode result, AnchorJobEntity job, Instant checkedAt, String message) {
+    private ReconcileDecision decision(
+            ReconcileResultCode result,
+            AnchorJobEntity job,
+            Instant checkedAt,
+            String message,
+            String recommendedAction,
+            Long cooldownRemainingSeconds
+    ) {
         return new ReconcileDecision(
                 result,
                 job.getCredentialId(),
                 job.getJobType(),
                 job.getStatus(),
                 checkedAt,
-                message
+                message,
+                recommendedAction,
+                cooldownRemainingSeconds
         );
     }
 
@@ -311,6 +358,9 @@ public class JobService {
                 || message.contains("Already revoked")
                 || message.contains("Credential not anchored")) {
             return JobFailureCode.CHAIN_REJECTED;
+        }
+        if (e instanceof WalletDisabledException) {
+            return JobFailureCode.WALLET_DISABLED;
         }
         if (message.contains("Illegal transition")) {
             return JobFailureCode.LOCAL_TRANSITION_ERROR;

@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: blockcred-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${BLOCKCRED_DB_NAME:-blockcred}
+      POSTGRES_USER: ${BLOCKCRED_DB_USER:-blockcred}
+      POSTGRES_PASSWORD: ${BLOCKCRED_DB_PASSWORD:-blockcred}
+    ports:
+      - "5432:5432"
+    volumes:
+      - blockcred_pg_data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: blockcred-app
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: pilot
+      BLOCKCRED_DB_URL: jdbc:postgresql://postgres:5432/${BLOCKCRED_DB_NAME:-blockcred}
+      BLOCKCRED_DB_USER: ${BLOCKCRED_DB_USER:-blockcred}
+      BLOCKCRED_DB_PASSWORD: ${BLOCKCRED_DB_PASSWORD:-blockcred}
+      BLOCKCRED_ADMIN_TOKEN: ${BLOCKCRED_ADMIN_TOKEN}
+      BLOCKCRED_ISSUER_TOKEN: ${BLOCKCRED_ISSUER_TOKEN}
+      BLOCKCRED_PUBLIC_TOKEN_SECRET: ${BLOCKCRED_PUBLIC_TOKEN_SECRET}
+      BLOCKCRED_AUDIT_DIGEST_SECRET: ${BLOCKCRED_AUDIT_DIGEST_SECRET}
+      BLOCKCRED_WALLET_KEY_SOURCE: ${BLOCKCRED_WALLET_KEY_SOURCE:-ENV}
+      BLOCKCRED_WALLET_KEY: ${BLOCKCRED_WALLET_KEY:-}
+      BLOCKCRED_WALLET_KEY_FILE: ${BLOCKCRED_WALLET_KEY_FILE:-}
+
+volumes:
+  blockcred_pg_data:

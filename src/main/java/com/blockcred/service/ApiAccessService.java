@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
@@ -22,6 +24,8 @@ public class ApiAccessService {
     private final boolean issuerTokenEnabled;
     private final String issuerToken;
     private final String publicTokenSecret;
+    private final String walletKeySource;
+    private final String walletKeyFilePath;
     private final Environment environment;
 
     public ApiAccessService(
@@ -29,12 +33,16 @@ public class ApiAccessService {
             @Value("${blockcred.auth.issuer-token-enabled:false}") boolean issuerTokenEnabled,
             @Value("${blockcred.auth.issuer-token:" + DEFAULT_ISSUER_TOKEN + "}") String issuerToken,
             @Value("${blockcred.public.token-secret:" + DEFAULT_PUBLIC_TOKEN_SECRET + "}") String publicTokenSecret,
+            @Value("${blockcred.wallet.key-source:ENV}") String walletKeySource,
+            @Value("${blockcred.wallet.key-file-path:}") String walletKeyFilePath,
             Environment environment
     ) {
         this.adminToken = adminToken;
         this.issuerTokenEnabled = issuerTokenEnabled;
         this.issuerToken = issuerToken;
         this.publicTokenSecret = publicTokenSecret;
+        this.walletKeySource = walletKeySource;
+        this.walletKeyFilePath = walletKeyFilePath;
         this.environment = environment;
     }
 
@@ -59,6 +67,9 @@ public class ApiAccessService {
         }
         if (DEFAULT_PUBLIC_TOKEN_SECRET.equals(publicTokenSecret)) {
             throw new IllegalStateException("Non-dev profile requires blockcred.public.token-secret override");
+        }
+        if (!walletKeyPresent()) {
+            throw new IllegalStateException("Non-dev profile requires wallet key material (ENV/FILE) configured");
         }
     }
 
@@ -94,5 +105,14 @@ public class ApiAccessService {
 
     private ResponseStatusException forbidden() {
         return new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden");
+    }
+
+    private boolean walletKeyPresent() {
+        String source = walletKeySource == null ? "" : walletKeySource.trim().toUpperCase();
+        if ("FILE".equals(source)) {
+            return walletKeyFilePath != null && !walletKeyFilePath.isBlank() && Files.exists(Path.of(walletKeyFilePath));
+        }
+        String env = System.getenv("BLOCKCRED_WALLET_KEY");
+        return env != null && !env.isBlank();
     }
 }

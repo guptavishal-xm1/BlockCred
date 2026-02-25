@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './lib/api'
 
 const STORAGE_KEY = 'blockcred.issuedCredentials'
@@ -36,10 +36,30 @@ function createIssuePayload() {
 }
 
 function formatTime(iso) {
+  if (!iso) {
+    return 'N/A'
+  }
   try {
     return new Date(iso).toLocaleString()
   } catch {
     return iso
+  }
+}
+
+function lifecycleLabel(status) {
+  switch (status) {
+    case 'ANCHORING_PENDING':
+      return 'Pending blockchain confirmation'
+    case 'ANCHORED':
+      return 'Confirmed on blockchain'
+    case 'REVOKED':
+      return 'Revoked by issuer'
+    case 'ANCHOR_FAILED':
+      return 'Anchoring failed, retry scheduled'
+    case 'ISSUED':
+      return 'Issued and queued for anchoring'
+    default:
+      return status || 'Unknown'
   }
 }
 
@@ -102,6 +122,11 @@ function App() {
   const [activityLog, setActivityLog] = useState([])
   const [busyAction, setBusyAction] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [opsSummary, setOpsSummary] = useState(null)
+  const [opsState, setOpsState] = useState(null)
+  const [opsAnomalies, setOpsAnomalies] = useState([])
+  const [walletStatus, setWalletStatus] = useState(null)
+  const [reconcileFeedback, setReconcileFeedback] = useState(null)
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY)
@@ -125,6 +150,35 @@ function App() {
 
   const latestRecord = useMemo(() => issuedRecords[0], [issuedRecords])
 
+  const refreshOpsPanels = useCallback(async (targetCredentialId) => {
+    const credentialId = targetCredentialId || reconcileCredentialId || verifyCredentialId
+    try {
+      const [summary, anomalies, wallet] = await Promise.all([
+        api.opsSummary(),
+        api.opsAnomalies(10),
+        api.walletStatus(),
+      ])
+      setOpsSummary(summary)
+      setOpsAnomalies(Array.isArray(anomalies) ? anomalies : [])
+      setWalletStatus(wallet)
+
+      if (credentialId) {
+        try {
+          const state = await api.opsCredentialState(credentialId)
+          setOpsState(state)
+        } catch (stateError) {
+          if (stateError?.message?.includes('Credential not found')) {
+            setOpsState(null)
+          } else {
+            throw stateError
+          }
+        }
+      }
+    } catch (error) {
+      setErrorMessage(error.message)
+    }
+  }, [reconcileCredentialId, verifyCredentialId])
+
   function pushLog(action, details) {
     setActivityLog((prev) => [
       { action, details, at: new Date().toISOString() },
@@ -136,9 +190,17 @@ function App() {
     setIssuePayload((prev) => ({ ...prev, [field]: value }))
   }
 
+  useEffect(() => {
+    if (activeTab !== 'university') {
+      return
+    }
+    refreshOpsPanels(reconcileCredentialId)
+  }, [activeTab, reconcileCredentialId, refreshOpsPanels])
+
   async function handleIssue(e) {
     e.preventDefault()
     setErrorMessage('')
+    setReconcileFeedback(null)
     setBusyAction('issue')
     try {
       const response = await api.issueCredential(issuePayload)
@@ -159,6 +221,7 @@ function App() {
         ]
         return next
       })
+      await refreshOpsPanels(response.credentialId)
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -168,6 +231,7 @@ function App() {
 
   async function handleRevoke() {
     setErrorMessage('')
+    setReconcileFeedback(null)
     setBusyAction('revoke')
     try {
       const response = await api.revokeCredential(revokeCredentialId)
@@ -176,6 +240,7 @@ function App() {
       setIssuedRecords((prev) => prev.map((r) => (
         r.credentialId === response.credentialId ? { ...r, status: response.status } : r
       )))
+      await refreshOpsPanels(response.credentialId)
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -185,10 +250,41 @@ function App() {
 
   async function handleReconcile() {
     setErrorMessage('')
+    setReconcileFeedback(null)
     setBusyAction('reconcile')
     try {
       const response = await api.reconcileCredential(reconcileCredentialId)
       pushLog('RECONCILE', `${reconcileCredentialId} => ${response.result}`)
+      setReconcileFeedback(response)
+      await refreshOpsPanels(reconcileCredentialId)
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function handleWalletDisable() {
+    setErrorMessage('')
+    setBusyAction('walletDisable')
+    try {
+      await api.walletDisable('Operator initiated temporary disable')
+      pushLog('WALLET_DISABLE', 'Issuer wallet disabled for safe mode')
+      await refreshOpsPanels(reconcileCredentialId)
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function handleWalletEnable() {
+    setErrorMessage('')
+    setBusyAction('walletEnable')
+    try {
+      await api.walletEnable()
+      pushLog('WALLET_ENABLE', 'Issuer wallet re-enabled')
+      await refreshOpsPanels(reconcileCredentialId)
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -363,6 +459,126 @@ function App() {
                       {busyAction === 'reconcile' ? 'Reconciling...' : 'Reconcile'}
                     </button>
                   </div>
+                </div>
+
+                {reconcileFeedback ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reconcile Result</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-800">{reconcileFeedback.result}</p>
+                    <p className="text-sm text-slate-700">{reconcileFeedback.message}</p>
+                    <p className="text-sm text-slate-700">{reconcileFeedback.recommendedAction}</p>
+                    {typeof reconcileFeedback.cooldownRemainingSeconds === 'number' ? (
+                      <p className="text-xs text-slate-500">
+                        Cooldown remaining: {reconcileFeedback.cooldownRemainingSeconds}s
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold text-slate-800">Ops Summary</h3>
+                      <button
+                        type="button"
+                        onClick={() => refreshOpsPanels(reconcileCredentialId)}
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    {opsSummary ? (
+                      <div className="space-y-1 text-xs text-slate-700">
+                        <p>Pending: {opsSummary.pendingCount} | Retryable: {opsSummary.retryableCount} | Final failed: {opsSummary.finalFailedCount}</p>
+                        <p>Pending age max: {opsSummary.maxPendingAgeMinutes ?? 'N/A'} min</p>
+                        <p>Worker heartbeat: {formatTime(opsSummary.lastWorkerRunAt)}</p>
+                        <p>Chain reachable: {opsSummary.chainReachable ? 'Yes' : 'No'}</p>
+                        <p>Recent anomalies (24h): {opsSummary.recentAnomalyCount}</p>
+                        <p>Latest audit digest: {opsSummary.latestAuditDigestDate || 'N/A'} ({opsSummary.latestAuditDigestRecordCount ?? 0} records)</p>
+                        <p className="font-semibold">
+                          Alerts: {opsSummary.pendingAgeAlert || opsSummary.retryThresholdAlert || opsSummary.finalFailedAlert || opsSummary.revocationPropagationAlert ? 'Attention required' : 'Normal'}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">No summary yet.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <h3 className="mb-2 text-sm font-bold text-slate-800">Wallet Safeguard</h3>
+                    {walletStatus ? (
+                      <div className="space-y-1 text-xs text-slate-700">
+                        <p>Status: <span className="font-semibold">{walletStatus.enabled ? 'Enabled' : 'Disabled'}</span></p>
+                        <p>Key source: {walletStatus.keySource} ({walletStatus.keyPresent ? 'present' : 'missing'})</p>
+                        <p>Updated by: {walletStatus.updatedBy || 'N/A'}</p>
+                        <p>Updated at: {formatTime(walletStatus.updatedAt)}</p>
+                        {walletStatus.disableReason ? <p>Reason: {walletStatus.disableReason}</p> : null}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={handleWalletDisable}
+                            disabled={busyAction === 'walletDisable' || !walletStatus.enabled}
+                            className="rounded-lg border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                          >
+                            {busyAction === 'walletDisable' ? 'Disabling...' : 'Disable Wallet'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleWalletEnable}
+                            disabled={busyAction === 'walletEnable' || walletStatus.enabled}
+                            className="rounded-lg border border-emerald-300 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                          >
+                            {busyAction === 'walletEnable' ? 'Enabling...' : 'Enable Wallet'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">Wallet status unavailable.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="mb-2 text-sm font-bold text-slate-800">Credential Operational State</h3>
+                  {opsState ? (
+                    <div className="space-y-1 text-xs text-slate-700">
+                      <p>Lifecycle: <span className="font-semibold">{lifecycleLabel(opsState.lifecycleStatus)}</span></p>
+                      <p>Hash: <span className="font-mono">{opsState.hash}</span></p>
+                      <p>Last tx: <span className="font-mono">{opsState.lastTxHash || 'N/A'}</span></p>
+                      <p>Updated: {formatTime(opsState.updatedAt)}</p>
+                      {opsState.latestJob ? (
+                        <p>
+                          Latest job: {opsState.latestJob.jobType} / {opsState.latestJob.status}
+                          {' '}({opsState.latestJob.statusLabel}) | Retry: {opsState.latestJob.retryCount}
+                          {' '}| Last attempt: {formatTime(opsState.latestJob.lastAttemptAt)}
+                          {' '}| Next attempt: {formatTime(opsState.latestJob.nextRunAt)}
+                          {' '}| Failure code: {opsState.latestJob.failureCode || 'N/A'}
+                        </p>
+                      ) : (
+                        <p>No job found for this credential.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">No credential state loaded.</p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="mb-2 text-sm font-bold text-slate-800">Recent Anomalies</h3>
+                  {opsAnomalies.length === 0 ? (
+                    <p className="text-xs text-slate-500">No anomalies detected in latest scan window.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {opsAnomalies.slice(0, 5).map((anomaly) => (
+                        <li key={anomaly.id} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700">
+                          <p className="font-semibold">{anomaly.action} ({anomaly.severity})</p>
+                          <p>{anomaly.credentialId}: {anomaly.details}</p>
+                          <p>{anomaly.recommendedAction}</p>
+                          <p className="text-slate-500">{formatTime(anomaly.createdAt)}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
             ) : null}

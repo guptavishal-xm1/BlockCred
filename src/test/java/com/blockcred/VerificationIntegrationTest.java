@@ -9,6 +9,7 @@ import com.blockcred.domain.ReconcileDecision;
 import com.blockcred.infra.AnchorJobRepository;
 import com.blockcred.infra.AuditLogRepository;
 import com.blockcred.infra.CredentialRepository;
+import com.blockcred.infra.SystemControlRepository;
 import com.blockcred.service.CredentialService;
 import com.blockcred.service.InMemoryBlockchainGateway;
 import com.blockcred.service.JobService;
@@ -43,11 +44,14 @@ class VerificationIntegrationTest {
     private AnchorJobRepository anchorJobRepository;
     @Autowired
     private AuditLogRepository auditLogRepository;
+    @Autowired
+    private SystemControlRepository systemControlRepository;
 
     private CredentialCanonicalPayload payload;
 
     @BeforeEach
     void setup() {
+        systemControlRepository.deleteAll();
         auditLogRepository.deleteAll();
         anchorJobRepository.deleteAll();
         credentialRepository.deleteAll();

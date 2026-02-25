@@ -21,6 +21,8 @@ public interface AnchorJobRepository extends JpaRepository<AnchorJobEntity, Long
     List<AnchorJobEntity> findByStatusOrderByUpdatedAtDesc(JobStatus status, Pageable pageable);
     List<AnchorJobEntity> findByStatusInOrderByUpdatedAtDesc(List<JobStatus> statuses, Pageable pageable);
     List<AnchorJobEntity> findByStatusAndLastAttemptAtBefore(JobStatus status, Instant before, Pageable pageable);
+    Optional<AnchorJobEntity> findTopByStatusOrderByCreatedAtAsc(JobStatus status);
+    long countByJobTypeAndStatusInAndCreatedAtBefore(JobType jobType, List<JobStatus> statuses, Instant cutoff);
     long countByStatus(JobStatus status);
 
     @Modifying

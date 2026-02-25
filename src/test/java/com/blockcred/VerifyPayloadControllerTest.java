@@ -6,6 +6,7 @@ import com.blockcred.domain.CredentialCanonicalPayload;
 import com.blockcred.infra.AnchorJobRepository;
 import com.blockcred.infra.AuditLogRepository;
 import com.blockcred.infra.CredentialRepository;
+import com.blockcred.infra.SystemControlRepository;
 import com.blockcred.service.CredentialService;
 import com.blockcred.service.InMemoryBlockchainGateway;
 import com.blockcred.service.JobService;
@@ -45,11 +46,14 @@ class VerifyPayloadControllerTest {
     private InMemoryBlockchainGateway blockchainGateway;
     @Autowired
     private CacheManager cacheManager;
+    @Autowired
+    private SystemControlRepository systemControlRepository;
 
     private CredentialCanonicalPayload payload;
 
     @BeforeEach
     void setup() {
+        systemControlRepository.deleteAll();
         auditLogRepository.deleteAll();
         anchorJobRepository.deleteAll();
         credentialRepository.deleteAll();

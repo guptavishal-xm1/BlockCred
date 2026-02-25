@@ -8,13 +8,20 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: false
+    open-in-view: false
   h2:
     console:
       enabled: true
   cache:
     cache-names: verificationByHash
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
 
 blockcred:
+  scheduling:
+    enabled: true
   worker:
     cooldown-seconds: 60
     due-batch-size: 100
@@ -22,16 +29,33 @@ blockcred:
     stale-sent-seconds: 120
   verify:
     chain-lookup-timeout-ms: 800
+  ops:
+    pending-max-age-minutes: 10
+    retry-threshold: 3
+    revocation-grace-minutes: 15
+    consistency-scan-interval-minutes: 60
+    consistency-scan-window-hours: 24
   auth:
     admin-token: blockcred-admin-dev-token-change-me
     issuer-token-enabled: false
     issuer-token: blockcred-issuer-dev-token-change-me
+  wallet:
+    enabled: true
+    disabled-retry-seconds: 60
+    key-source: ENV
+    key-file-path:
   public:
     token-secret: blockcred-dev-secret-change-me
     token-issuer: blockcred
     token-ttl-days: 180
     verifier-base-url: http://localhost:5173
     tx-explorer-base-url: https://amoy.polygonscan.com/tx
+  audit:
+    digest-secret: blockcred-audit-dev-secret-change-me
+    digest-cron: "0 15 0 * * *"
+    retention-days: 365
+    digest-retention-days: 400
+    retention-cron: "0 30 1 * * *"
 
 management:
   endpoints:

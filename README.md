@@ -1,47 +1,83 @@
-# BlockCred Verification Core + Public Verifier
+# BlockCred Institutional Readiness Build
 
-Spring Boot reference implementation of BlockCred with a trust-first verification core and a public token-based verifier flow.
+BlockCred is a modular-monolith Spring Boot + React system for blockchain-backed academic credential issuance and verification.
 
-## Implemented Features
+This build is focused on operational readiness:
+- reliable async anchor/revoke job handling
+- typed admin reconcile + ops visibility endpoints
+- public token verifier for employer trust checks
+- wallet kill switch and compromise-safe recovery flow
+- audit integrity with daily digest and retention policies
+- deployable `pilot` profile for single-VM + Docker + Postgres
 
-- Deterministic canonical payload hashing
+## Implemented Capabilities
+
+- Deterministic canonical payload hashing and verification resolver
 - Verification API by payload, credential ID, and hash
-- Async anchor/revoke worker with retries and reconcile endpoint
-- CAS-style job claim, stale `SENT` recovery, and explicit failure codes
-- Modular backend services with cache-backed verification
-- Public verification endpoint: `/api/public/verify?t=...`
-- Minimal HMAC token service for signed verification links
-- Share-link endpoint for issuer flow
-- Correlation IDs, audit request IDs, and actuator metrics
-- Admin ops inspection endpoints for credential/job/audit state
-- React + Tailwind frontend:
-  - University panel (issue, revoke, reconcile)
-  - Employer verifier panel (internal tools)
-  - Student wallet panel
-  - Public `/verify` page (verdict hero + evidence panel)
+- Async anchoring and revocation with:
+  - claim-safe processing
+  - retry with failure codes
+  - stale `SENT` recovery
+  - admin reconcile with cooldown handling
+- Public verification endpoint `/api/public/verify?t=...`
+- Signed share links via minimal HMAC token service
+- Admin ops endpoints for:
+  - credential state
+  - job queue/failures
+  - audit timeline
+  - summary dashboard data
+  - anomalies feed
+  - wallet controls
+- Correlation ID propagation (`X-Request-Id`)
+- Audit enrichment (`severity`, `category`, `requestId`)
+- Daily audit digest generation (tamper-evidence artifact)
+- Audit retention cleanup scheduler
+- Operator SOP scripts (start/mid/end day)
+- DB backup/restore scripts
 
 ## Tech Stack
 
 - Java 17
 - Spring Boot 3.3.2
-- Spring Web, Validation, JPA, Cache
-- Spring Boot Actuator + Micrometer
-- H2 (in-memory)
+- Spring Web, Validation, Data JPA, Cache, Actuator
+- Flyway
+- H2 (dev/test)
+- PostgreSQL (pilot)
 - Caffeine
-- React 19 + Vite
-- Tailwind CSS 4
+- React + Vite + Tailwind
 - JUnit 5
 
-## Quick Start
+## Runtime Profiles
+
+- `dev`:
+  - H2 in-memory DB
+  - in-memory blockchain adapter
+  - fast local iteration
+- `pilot`:
+  - PostgreSQL
+  - Flyway migrations + `ddl-auto=validate`
+  - strict secret requirements
+- `test`:
+  - isolated H2 configuration for tests
+
+Files:
+- `src/main/resources/application.yml`
+- `src/main/resources/application-dev.yml`
+- `src/main/resources/application-pilot.yml`
+- `src/main/resources/application-test.yml`
+
+## Local Quick Start
+
+### Backend
 
 ```bash
 mvn clean test
 mvn spring-boot:run
 ```
 
-Backend URL: `http://localhost:8080`
+Backend: `http://localhost:8080`
 
-## Frontend Quick Start
+### Frontend
 
 ```bash
 cd frontend
@@ -49,58 +85,77 @@ npm install
 npm run dev
 ```
 
-Frontend URL: `http://localhost:5173`
+Frontend: `http://localhost:5173`
 
-Notes:
+## Pilot Deployment (Single VM + Docker)
 
-- Vite proxies `/api` to `http://localhost:8080`.
-- Backend CORS allows `http://localhost:5173`.
+1. Copy env template:
 
-## Auth Headers
+```bash
+cp .env.example .env
+```
 
-- Admin ops endpoints require `X-Admin-Token`.
-- Credential mutation endpoints (`issue`, `revoke`, `share-link`) can optionally require `X-Issuer-Token` when `blockcred.auth.issuer-token-enabled=true`.
+2. Fill required secrets in `.env`:
+- `BLOCKCRED_ADMIN_TOKEN`
+- `BLOCKCRED_ISSUER_TOKEN`
+- `BLOCKCRED_PUBLIC_TOKEN_SECRET`
+- `BLOCKCRED_AUDIT_DIGEST_SECRET`
+- wallet key settings (`BLOCKCRED_WALLET_KEY_SOURCE` + key value/path)
 
-Dev defaults (from `application.yml`):
+3. Start stack:
 
-- `blockcred.auth.admin-token=blockcred-admin-dev-token-change-me`
-- `blockcred.auth.issuer-token=blockcred-issuer-dev-token-change-me`
+```bash
+docker compose --env-file .env up --build -d
+```
+
+4. Verify health:
+
+```bash
+curl -s http://localhost:8080/actuator/health
+```
+
+## Security Headers
+
+- Admin ops endpoints: `X-Admin-Token`
+- Issuer mutation endpoints: `X-Issuer-Token` (enabled when `blockcred.auth.issuer-token-enabled=true`)
+- Correlation: optional `X-Request-Id`
 
 ## API Overview
+
+### Credential APIs
 
 - `POST /api/credentials`
 - `POST /api/credentials/{credentialId}/revoke`
 - `POST /api/credentials/{credentialId}/share-link`
+
+### Verification APIs
+
 - `POST /api/verify/payload`
 - `GET /api/verify?credentialId=...`
 - `GET /api/verify/hash/{hash}`
 - `GET /api/public/verify?t=...`
-- `POST /api/ops/reconcile/{credentialId}` (admin-only)
-- `GET /api/ops/credentials/{credentialId}/state` (admin-only)
-- `GET /api/ops/jobs?status=&limit=` (admin-only)
-- `GET /api/ops/audit?credentialId=&limit=` (admin-only)
+
+### Ops APIs (Admin)
+
+- `POST /api/ops/reconcile/{credentialId}`
+- `GET /api/ops/credentials/{credentialId}/state`
+- `GET /api/ops/jobs?status=&limit=`
+- `GET /api/ops/audit?credentialId=&limit=`
+- `GET /api/ops/summary`
+- `GET /api/ops/anomalies?limit=`
+- `GET /api/ops/wallet/status`
+- `POST /api/ops/wallet/disable`
+- `POST /api/ops/wallet/enable`
+
+### Actuator
+
 - `GET /actuator/health`
 - `GET /actuator/metrics`
 - `GET /actuator/info`
 
-## End-to-End (Internal Flow)
+## End-to-End Internal Flow (cURL)
 
-Sample payload:
-
-```json
-{
-  "credentialId": "CRED-001",
-  "universityId": "UNI-001",
-  "studentId": "STU-001",
-  "program": "Computer Science",
-  "degree": "B.Tech",
-  "issueDate": "2026-02-25",
-  "nonce": "550e8400-e29b-41d4-a716-446655440000",
-  "version": "1.0"
-}
-```
-
-### 1) Issue credential
+### Issue
 
 ```bash
 curl -s -X POST http://localhost:8080/api/credentials \
@@ -120,166 +175,156 @@ curl -s -X POST http://localhost:8080/api/credentials \
   }'
 ```
 
-Golden vector hash for this payload:
-
-`9a1ebcf321a70ac5afd6faa003fbd1590bffbe93546477e53a0a362fdc4c52ba`
-
-### 2) Verify internally (optional)
-
-```bash
-curl -s -X POST http://localhost:8080/api/verify/payload \
-  -H "Content-Type: application/json" \
-  -d '{
-    "payload": {
-      "credentialId": "CRED-001",
-      "universityId": "UNI-001",
-      "studentId": "STU-001",
-      "program": "Computer Science",
-      "degree": "B.Tech",
-      "issueDate": "2026-02-25",
-      "nonce": "550e8400-e29b-41d4-a716-446655440000",
-      "version": "1.0"
-    }
-  }'
-```
-
-## Public Verifier Slice (`/verify?t=`)
-
-### 1) Generate share link
-
-```bash
-curl -s -X POST http://localhost:8080/api/credentials/CRED-001/share-link \
-  -H "X-Issuer-Token: blockcred-issuer-dev-token-change-me"
-```
-
-Response shape:
-
-```json
-{
-  "verifyUrl": "http://localhost:5173/verify?t=...",
-  "tokenExpiresAt": "2026-...Z"
-}
-```
-
-### 2) Open public verifier page
-
-Open `verifyUrl` in browser.
-
-This renders a standalone public verification page with:
-
-- verdict hero
-- honest freshness text derived from backend `checkedAt`
-- evidence panel
-- secondary technical transaction link
-- deterministic “Copy verification summary” action
-
-Note:
-
-- Since anchoring is async, a newly issued credential may briefly show `PENDING_ANCHOR` until the worker confirms chain state (typically a few seconds in this setup).
-
-### 3) Verify via public API directly
-
-```bash
-curl -s "http://localhost:8080/api/public/verify?t=<TOKEN>"
-```
-
-The public response includes:
-
-- `verificationStatus`
-- `verdictHeadline`
-- `decisionHint`
-- `issuer`
-- `checkedAt`
-- `credentialHash`
-- `blockchainConfirmation`
-- `txHash`
-- `txExplorerUrl`
-- `explanation`
-- `referenceContext`
-
-## Viva Demo Script (All Public States)
-
-Run this to demonstrate `PENDING_ANCHOR -> VALID -> REVOKED -> NOT_FOUND` in one flow:
-
-```bash
-./scripts/viva_public_verify.sh
-```
-
-Optional backend URL override:
-
-```bash
-BACKEND_URL=http://localhost:8080 ./scripts/viva_public_verify.sh
-```
-
-## Reconcile Endpoint
+### Reconcile (typed response)
 
 ```bash
 curl -s -X POST http://localhost:8080/api/ops/reconcile/CRED-001 \
   -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
 ```
 
-Typed response example:
+Response includes:
+- `result`
+- `message`
+- `recommendedAction`
+- `cooldownRemainingSeconds` (when cooldown active)
 
-`{"result":"NO_ACTIONABLE_JOB","credentialId":"CRED-001","jobType":"ANCHOR","jobStatus":"CONFIRMED","checkedAt":"...","message":"No actionable job: already confirmed"}`
+## Public Verifier Demo
 
-## Ops Inspection Endpoints
+Run full public flow (pending -> valid -> revoked -> unresolved):
 
 ```bash
-curl -s "http://localhost:8080/api/ops/credentials/CRED-001/state" \
-  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+./scripts/viva_public_verify.sh
+```
 
-curl -s "http://localhost:8080/api/ops/jobs?status=FINAL_FAILED&limit=20" \
-  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+Optional environment:
 
-curl -s "http://localhost:8080/api/ops/audit?credentialId=CRED-001&limit=20" \
+```bash
+BACKEND_URL=http://localhost:8080 ISSUER_TOKEN=blockcred-issuer-dev-token-change-me ./scripts/viva_public_verify.sh
+```
+
+## Operator SOP Scripts
+
+### Start-of-day check
+
+```bash
+ADMIN_TOKEN=blockcred-admin-dev-token-change-me ./scripts/ops_start_of_day.sh
+```
+
+### Mid-day exception handling
+
+```bash
+ADMIN_TOKEN=blockcred-admin-dev-token-change-me ./scripts/ops_midday_exception.sh CRED-001
+```
+
+### End-of-day closure
+
+```bash
+ADMIN_TOKEN=blockcred-admin-dev-token-change-me ./scripts/ops_end_of_day.sh
+```
+
+### Credential deep inspection
+
+```bash
+ADMIN_TOKEN=blockcred-admin-dev-token-change-me ./scripts/ops_state.sh CRED-001
+```
+
+### Retry final failed jobs
+
+```bash
+ADMIN_TOKEN=blockcred-admin-dev-token-change-me DRY_RUN=true ./scripts/ops_retry_failed.sh
+ADMIN_TOKEN=blockcred-admin-dev-token-change-me DRY_RUN=false ./scripts/ops_retry_failed.sh
+```
+
+## Wallet Safeguard Operations
+
+### Status
+
+```bash
+curl -s http://localhost:8080/api/ops/wallet/status \
   -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
 ```
 
-## Ops Scripts
+### Disable (compromise-safe mode)
 
 ```bash
-chmod +x scripts/ops_state.sh scripts/ops_retry_failed.sh
-
-./scripts/ops_state.sh CRED-001
-DRY_RUN=true ./scripts/ops_retry_failed.sh
-DRY_RUN=false ./scripts/ops_retry_failed.sh
+curl -s -X POST http://localhost:8080/api/ops/wallet/disable \
+  -H "X-Admin-Token: blockcred-admin-dev-token-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"Incident response"}'
 ```
 
-## Sandbox Debug Utility
+### Enable
 
-Run:
+```bash
+curl -s -X POST http://localhost:8080/api/ops/wallet/enable \
+  -H "X-Admin-Token: blockcred-admin-dev-token-change-me"
+```
+
+When disabled, chain submission is blocked and jobs remain retryable with `failureCode=WALLET_DISABLED`.
+
+## Backup and Restore
+
+### Backup
+
+```bash
+DB_HOST=localhost DB_PORT=5432 DB_NAME=blockcred DB_USER=blockcred DB_PASSWORD=blockcred ./scripts/db_backup.sh
+```
+
+### Restore
+
+```bash
+DB_HOST=localhost DB_PORT=5432 DB_NAME=blockcred DB_USER=blockcred DB_PASSWORD=blockcred ./scripts/db_restore.sh backups/blockcred_<timestamp>.sql.gz
+```
+
+### Restore verification
+
+```bash
+BACKEND_URL=http://localhost:8080 ADMIN_TOKEN=blockcred-admin-dev-token-change-me ./scripts/db_restore_verify.sh
+```
+
+## Recovery Playbooks
+
+### RPC outage
+
+- Expected: verification returns controlled `CHAIN_UNAVAILABLE` or `PENDING_ANCHOR`.
+- Recovery: automatic retries + manual reconcile.
+
+### Worker outage
+
+- Expected: queue accumulates without loss.
+- Recovery: restart service; worker drains backlog via bounded batches.
+
+### Wallet compromise
+
+1. Disable wallet.
+2. Rotate wallet key + token secrets.
+3. Restart service.
+4. Reconcile backlog.
+5. Export audit timeline.
+
+### DB restore
+
+- Restore DB dump.
+- Verify health, summary, anomalies.
+- Run a known credential verification check.
+
+## Audit Integrity
+
+- Audit records include actor, request ID, category, severity, details.
+- Daily digest job computes HMAC digest for each UTC day.
+- Digest stored in `audit_digests` with record count.
+- Retention policy cleanup is scheduled and configurable.
+
+## Sandbox Utility
 
 ```bash
 mvn spring-boot:run -Dspring-boot.run.arguments=--blockcred.sandbox.enabled=true
 ```
 
-It prints canonical JSON, computed hash, DB/chain lookup inputs, and resolver verdict.
-
-## Ops Runbook (Quick Recovery)
-
-1. If chain/RPC is unavailable:
-- verify with `/api/public/verify?t=...` or `/api/verify/hash/{hash}` and expect controlled `CHAIN_UNAVAILABLE`/`PENDING_ANCHOR`.
-- inspect job backlog with `/api/ops/jobs?status=RETRYABLE`.
-
-2. If jobs reach `FINAL_FAILED`:
-- inspect credential/job/audit with `./scripts/ops_state.sh <credentialId>`.
-- queue retries in controlled mode with `DRY_RUN=false ./scripts/ops_retry_failed.sh`.
-
-3. If reconcile returns cooldown/no-actionable:
-- read typed `result` and `message` from reconcile response.
-- check latest audit entries via `/api/ops/audit`.
-
-## Verification Statuses
-
-- `VALID`
-- `REVOKED`
-- `NOT_FOUND`
-- `TAMPERED`
-- `PENDING_ANCHOR`
-- `CHAIN_UNAVAILABLE`
+Prints canonical JSON, hash, DB/chain inputs, verdict, and latest job snapshot.
 
 ## Notes
 
 - Current blockchain adapter is `InMemoryBlockchainGateway` for deterministic local behavior.
-- Cache key is always `credentialHash` for internal verify paths.
-- Public `/api/public/verify` intentionally uses live verification path (no cache shortcut).
+- Public verification path uses live verification (no cache shortcut) by design.
+- Cache key remains `credentialHash` for internal verification caches.

@@ -8,6 +8,8 @@ public record ReconcileDecision(
         JobType jobType,
         JobStatus jobStatus,
         Instant checkedAt,
-        String message
+        String message,
+        String recommendedAction,
+        Long cooldownRemainingSeconds
 ) {
 }

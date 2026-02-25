@@ -23,19 +23,22 @@ public class CredentialService {
     private final CredentialHashService hashService;
     private final CredentialStateMachine stateMachine;
     private final CacheManager cacheManager;
+    private final AuditService auditService;
 
     public CredentialService(
             CredentialRepository credentialRepository,
             AnchorJobRepository anchorJobRepository,
             CredentialHashService hashService,
             CredentialStateMachine stateMachine,
-            CacheManager cacheManager
+            CacheManager cacheManager,
+            AuditService auditService
     ) {
         this.credentialRepository = credentialRepository;
         this.anchorJobRepository = anchorJobRepository;
         this.hashService = hashService;
         this.stateMachine = stateMachine;
         this.cacheManager = cacheManager;
+        this.auditService = auditService;
     }
 
     @Transactional
@@ -58,6 +61,7 @@ public class CredentialService {
         credentialRepository.save(credential);
 
         ensureActiveJob(payload.credentialId(), hash, JobType.ANCHOR);
+        auditService.log("ISSUED", payload.credentialId(), "issuer", hash);
         evict(hash);
         return new CredentialResponse(payload.credentialId(), hash, credential.getLifecycleStatus());
     }
@@ -70,6 +74,7 @@ public class CredentialService {
         credential.setLifecycleStatus(stateMachine.transition(credential.getLifecycleStatus(), CredentialEvent.REVOKE_REQUESTED));
         credentialRepository.save(credential);
         ensureActiveJob(credentialId, credential.getHash(), JobType.REVOKE);
+        auditService.log("REVOKE_REQUESTED", credentialId, "issuer", credential.getHash());
         evict(credential.getHash());
         return new CredentialResponse(credentialId, credential.getHash(), credential.getLifecycleStatus());
     }

@@ -33,6 +33,9 @@ logs/
 # Coverage / reports
 coverage/
 *.lcov
+backups/
+ops_reports/
+viva_output/
 
 # Temporary files
 *.tmp
